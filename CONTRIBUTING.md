@@ -1,0 +1,9 @@
+# Contributing
+
+1. Fork, branch, make your change.
+2. `pip install -r requirements-playwright.txt` (or `-selenium` / `-puppeteer`) and run `python3 smoke_test.py` — it must pass with **no** engine installed at all, so if you're only testing one engine, that's still a meaningful run.
+3. **If you touched `flight_parser.py`: this is the important one.** No real capture of skyscanner.com exists anywhere in this repo's history (see that file's module docstring — WebFetch on this site is robots.txt-restricted, and that restriction was not bypassed to build this). Every selector and JSON-shape guess in there is marked `# TODO: verify live`. If you have a real, scrubbed `--dump-html` capture, save it under `tests/fixtures/`, update `flight_parser.py` to match, and remove the `# TODO` for whatever you just confirmed — that turns a guess into this repo's first actually-verified site knowledge. Don't remove a `# TODO` without a capture backing it up.
+4. Keep the three engines behaving identically: same exit codes, same `Product` schema, same CLI flags. If one needs to diverge (see `selenium_scraper.py`'s CDP-credential limitation for an example), say why in a comment.
+5. Open a PR. CI runs the offline suite on two Python versions plus one `engine-smoke` job per engine, each in its own virtualenv, plus a daily `canary` job that runs the local-first default against the real site with no secrets (see `TESTING.md`).
+
+Bug reports and feature requests: open an issue. Please include the exact command you ran and the `.meta.json` sidecar from the run (or note that none was written — that's itself informative, see `output_writer.finish_run`'s docstring), not just a description. If you're reporting that zero itineraries came back, attaching a `--dump-html` capture is the single most useful thing you can add — it's exactly what `flight_parser.py` still needs.

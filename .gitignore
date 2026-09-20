@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv*/
+.env
+*.json.meta.json
+_smoke_roundtrip.env
