@@ -2,5 +2,8 @@ __pycache__/
 *.pyc
 .venv*/
 .env
+.env.save
 *.json.meta.json
 _smoke_roundtrip.env
+*_debug.html
+.DS_Store
