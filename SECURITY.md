@@ -1,8 +1,34 @@
 # Security
 
+## Supported versions
+
+Only the latest commit on `main` and the most recently tagged release get
+security fixes. This project is pre-1.0 (see `CHANGELOG.md`) — older tags
+are not backported.
+
 ## Reporting a vulnerability
 
-Please report security issues privately — open a GitHub security advisory on this repo, or email support@2captcha.com — rather than a public issue. Include the version/commit and a minimal reproduction.
+Please report security issues privately — open a GitHub security advisory
+on this repo, or email support@2captcha.com — rather than a public issue.
+Include the version/commit and a minimal reproduction.
+
+We aim to acknowledge a new report within 5 business days, confirm whether
+it's in scope, and share a fix timeline once it's confirmed. If a report
+turns out to be a real, exploitable issue, we'll credit the reporter in
+`CHANGELOG.md` unless they'd rather stay anonymous.
+
+## Scope
+
+**In scope**: this repo's own code and dependencies — credential handling,
+injection risks, anything that would make this tool leak a secret, execute
+untrusted code, or misreport what it actually did (a `complete` status on a
+run that silently dropped data would count, for example).
+
+**Out of scope**: vulnerabilities in skyscanner.com itself, or in a booking
+partner a search result deep-links to — report those to Skyscanner or that
+partner directly, not here. The PerimeterX bot challenge this tool
+documents hitting is a known, confirmed-permanent limitation of the target
+site (see README/CHANGELOG), not a vulnerability in this repo.
 
 ## What this tool does with credentials
 
