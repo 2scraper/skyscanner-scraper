@@ -71,6 +71,20 @@ around to build this — no `curl`, no bypass, nothing. That means:
   3. **`--cookies-file`**: load cookies from a session a HUMAN solved
      manually in a real browser once. This is reuse, never an automated
      solve — the scraper never attempts to clear the challenge itself.
+- **Update, 2026-09-21 — `--cdp-block-retries` exercised live, for real,
+  against the real site**: a full run (`--origin LHR --destination JFK`)
+  over a real Scraping Browser session exhausted all three attempts
+  (initial connection plus both retries) — each retry correctly
+  reconnected for a fresh session (a different exit identity from the
+  pool, confirmed in the log), and each fresh session was challenged by
+  PerimeterX just as fast as the last. Exit `3`, no `.meta.json` sidecar
+  (correct — a blocked run never gets one, see "The output contract").
+  The retry *mechanism* works exactly as designed; it just didn't clear
+  the block this time, which is the honest, expected outcome for a
+  reputation/behavior-based defense that isn't purely session-freshness
+  triggered — "sometimes simply isn't challenged" was always a hedge, not
+  a promise, and this run is the data point that keeps it a hedge rather
+  than quietly becoming an unearned claim of success.
 
 ## Local-first
 

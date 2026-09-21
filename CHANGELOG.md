@@ -9,6 +9,22 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Verified live, 2026-09-21 — `--cdp-block-retries` exercised end-to-end
+- `python3 playwright_scraper.py --origin LHR --destination JFK
+  --depart-date 2026-10-15 --max-results 10 --format json --out
+  /tmp/sky_test.json --dump-html` run against the real, live site over a
+  real 2Captcha Scraping Browser API session (`SKYSCANNER_CDP_ENDPOINT`
+  from `.env`, picked up automatically). All three attempts (the initial
+  connection plus both `--cdp-block-retries` retries) hit the PerimeterX
+  challenge; each retry reconnected for a fresh session as designed
+  (confirmed in the log), and each fresh session was challenged just as
+  quickly as the last. Final outcome: exit `3` (blocked), no `.meta.json`
+  sidecar written (correct per the output contract). This is the first
+  time the retry mechanism itself — not just the base block — has been
+  exercised against the real site: it behaves exactly as coded, and the
+  underlying PerimeterX gap remains exactly as confirmed-permanent as the
+  2026-09-20 entry below already says.
+
 ### Added — 2026-09-20, the confirmed-permanent PerimeterX gap and its three non-bypass mitigations
 - **Confirmed, not just unsolved-so-far**: a real run against the real
   site, over a real 2Captcha Scraping Browser API session
