@@ -42,6 +42,7 @@ to point at a specific binary instead.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import os
@@ -330,6 +331,9 @@ def _build_driver(*, headless: bool, proxy: Optional[Proxy], cdp_endpoint: Optio
     options.add_argument("--disable-dev-shm-usage")
     if _CHROME_BINARY:
         options.binary_location = _CHROME_BINARY
+    # Selenium has no response hook; Chrome's performance log is how
+    # _drain_search_api_responses() sees the search-API XHR.
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
     if user_agent:
         # The only piece of a 2Captcha Fingerprint API profile this repo
         # applies anywhere (see fingerprint_client.py's module docstring on
@@ -417,6 +421,40 @@ def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptchaClie
     return result
 
 
+def _drain_search_api_responses(driver, capture: "fp.SearchApiCapture", pending: set) -> None:
+    """Feed every finished search-API response since the last call into
+    `capture`: responseReceived marks the request, loadingFinished means
+    its body can be fetched over CDP. `pending` carries requests whose body
+    wasn't finished yet across calls. Never raises."""
+    try:
+        entries = driver.get_log("performance")
+    except Exception as exc:  # noqa: BLE001 — e.g. a driver without the log enabled
+        log.debug("Performance log unavailable, search-API capture off: %s", exc)
+        return
+    for entry in entries:
+        try:
+            msg = json.loads(entry["message"])["message"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        method, params = msg.get("method"), msg.get("params") or {}
+        if method == "Network.responseReceived":
+            response = params.get("response") or {}
+            if response.get("status") == 200 and fp.is_search_api_url(response.get("url")):
+                pending.add(params.get("requestId"))
+        elif method == "Network.loadingFinished" and params.get("requestId") in pending:
+            pending.discard(params["requestId"])
+            try:
+                body = driver.execute_cdp_cmd("Network.getResponseBody", {"requestId": params["requestId"]})
+            except WebDriverException as exc:
+                log.debug("Could not read a search-API response body: %s", exc)
+                continue
+            text = body.get("body", "")
+            if body.get("base64Encoded"):
+                text = base64.b64decode(text)
+            if capture.add(text):
+                log.info("Captured a search-API response (status %s).", capture.status)
+
+
 def scrape_search(
     *, args: argparse.Namespace, start_url: str,
     proxy_pool: Optional[ProxyPool], client: Optional[TwoCaptchaClient],
@@ -437,6 +475,8 @@ def scrape_search(
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
     driver = _build_driver(headless=args.headless, proxy=proxy, cdp_endpoint=args.cdp_endpoint, user_agent=user_agent, stealth=args.stealth)
     _apply_cookies(driver, cookies, start_url)
+    capture = fp.SearchApiCapture()
+    pending_requests: set = set()
 
     last_error = None
     status = None
@@ -482,6 +522,7 @@ def scrape_search(
 
     for round_num in range(args.max_scrolls + 1):
         rounds = round_num
+        _drain_search_api_responses(driver, capture, pending_requests)
         html = driver.page_source
         if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
             blocked = True
@@ -496,15 +537,27 @@ def scrape_search(
             cabin_class=args.cabin_class, stops=args.stops, sort=args.sort,
             max_results=args.max_results,
         )
+        result = fp.combine_results(capture.parse(
+            origin=args.origin, destination=args.destination, depart_date=args.depart_date,
+            return_date=args.return_date, adults=args.adults, currency=args.currency,
+            cabin_class=args.cabin_class, stops=args.stops, sort=args.sort,
+            max_results=args.max_results,
+        ), result)
         round_skus = {_sku_key(p) for p in result.products}
         new_skus = round_skus - seen_skus
+        if result.source_used == "search_api":
+            # A later poll refreshes the price of rows already collected.
+            fresh = {_sku_key(p): p for p in result.products}
+            merged = [fresh.get(_sku_key(p), p) for p in merged]
         if new_skus:
             for p in result.products:
                 if _sku_key(p) in new_skus:
                     merged.append(p)
             seen_skus |= new_skus
             stall = 0
-        else:
+        elif not capture.incomplete:
+            # While the page is still polling (context.status "incomplete"),
+            # an unchanged round is not a stall — more results are coming.
             stall += 1
 
         if len(merged) >= args.max_results:
@@ -522,6 +575,10 @@ def scrape_search(
             scroll_error = True
             break
         time.sleep(args.scroll_delay)
+
+    if args.dump_html and capture.payloads:
+        api_dump = _dump_path(args.out).replace("_debug.html", "_search_api_debug.json")
+        Path(api_dump).write_text(json.dumps(capture.payloads[-1], ensure_ascii=False), encoding="utf-8")
 
     if args.dump_html:
         Path(_dump_path(args.out)).write_text(driver.page_source, encoding="utf-8")

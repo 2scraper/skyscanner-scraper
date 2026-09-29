@@ -393,6 +393,20 @@ async def scrape_search(
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
     context = await _new_context(browser, proxy, user_agent, cookies=cookies, stealth=args.stealth)
     page = await context.new_page()
+    capture = fp.SearchApiCapture()
+
+    async def _on_response(response) -> None:
+        # The flight list arrives over this XHR, not in the HTML (see
+        # flight_parser.SearchApiCapture).
+        if response.status != 200 or not fp.is_search_api_url(response.url):
+            return
+        try:
+            if capture.add(await response.text()):
+                log.info("Captured a search-API response (status %s).", capture.status)
+        except Exception as exc:  # noqa: BLE001 — a lost poll must never crash the run
+            log.debug("Could not read a search-API response body: %s", exc)
+
+    page.on("response", _on_response)
     if autosolve:
         await _enable_scraping_browser_auto_solve(context, page)
 
@@ -464,6 +478,12 @@ async def scrape_search(
             cabin_class=args.cabin_class, stops=args.stops, sort=args.sort,
             max_results=args.max_results,
         )
+        result = fp.combine_results(capture.parse(
+            origin=args.origin, destination=args.destination, depart_date=args.depart_date,
+            return_date=args.return_date, adults=args.adults, currency=args.currency,
+            cabin_class=args.cabin_class, stops=args.stops, sort=args.sort,
+            max_results=args.max_results,
+        ), result)
         if result.source_used == "none" and round_num == 0 and not blocked:
             log.warning(
                 "No itineraries recognised on the first render — either this search "
@@ -474,13 +494,19 @@ async def scrape_search(
 
         round_skus = {_sku_key(p) for p in result.products}
         new_skus = round_skus - seen_skus
+        if result.source_used == "search_api":
+            # A later poll refreshes the price of rows already collected.
+            fresh = {_sku_key(p): p for p in result.products}
+            merged = [fresh.get(_sku_key(p), p) for p in merged]
         if new_skus:
             for p in result.products:
                 if _sku_key(p) in new_skus:
                     merged.append(p)
             seen_skus |= new_skus
             stall = 0
-        else:
+        elif not capture.incomplete:
+            # While the page is still polling (context.status "incomplete"),
+            # an unchanged round is not a stall — more results are coming.
             stall += 1
 
         if len(merged) >= args.max_results:
@@ -498,6 +524,10 @@ async def scrape_search(
             scroll_error = True
             break
         await asyncio.sleep(args.scroll_delay)
+
+    if args.dump_html and capture.payloads:
+        api_dump = _dump_path(args.out).replace("_debug.html", "_search_api_debug.json")
+        Path(api_dump).write_text(json.dumps(capture.payloads[-1], ensure_ascii=False), encoding="utf-8")
 
     if args.dump_html:
         try:

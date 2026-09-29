@@ -22,7 +22,15 @@ able to look at the real site.** `WebFetch` on skyscanner.com's search
 pages returns `ROBOTS_DISALLOWED`, and that restriction was not worked
 around to build this — no `curl`, no bypass, nothing. That means:
 
-- `flight_parser.py`'s CSS selectors and embedded-JSON heuristics are
+- **Update 2026-09-29:** the flight list actually arrives over the
+  `web-unified-search` XHR, not in the HTML. A real response body
+  (captured by hand in Chrome, LHR→JFK, 373 itineraries) is now the
+  parser's verified source: all 373 rows parse with price, currency,
+  airline, times, stops and deeplink (`fixtures/` holds a trimmed copy).
+  All three engines capture that XHR and parse it before the HTML. What
+  is still unverified: the engines' capture against the live site, since
+  every live run so far stops at PerimeterX before the XHR fires.
+- `flight_parser.py`'s CSS selectors and `__NEXT_DATA__` heuristics are
   **best-effort guesses**, each marked `# TODO: verify live` in that
   file, not confirmed site knowledge the way stockx-scraper's
   `product_parser.py` is (that one *was* built from real, live captures).
@@ -401,6 +409,9 @@ site):
   2Captcha's own `Captcha.setAutoSolve` CDP domain handles it entirely
   inside their infrastructure (wired up in `playwright_scraper.py` /
   `puppeteer_scraper.py`).
+- **`--scraper-api` gets HTML only**, so it never sees the
+  `web-unified-search` XHR; it can only fall back to the unverified
+  HTML paths. The three browser engines capture the XHR.
 - **The embedded-JSON extraction path is a generic heuristic, not a
   pinned query.** stockx-scraper's `getDiscoveryData` query name is
   confirmed; this repo's `_find_itinerary_lists()` instead walks

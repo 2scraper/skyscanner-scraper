@@ -374,6 +374,74 @@ def parse_search_json(
     return SearchResult(products=products, source_used="embedded_json" if products else "none")
 
 
+# --------------------------------------------------------------------------- #
+# XHR capture — the real flight list never appears in the initial HTML (an
+# empty shell, confirmed 2026-09-22); the page fetches it from
+# `web-unified-search` and re-polls it while `context.status` is
+# "incomplete" (confirmed on the 2026-09-29 capture). Engines hand every
+# matching response body to a SearchApiCapture; each round parses it.
+# --------------------------------------------------------------------------- #
+SEARCH_API_URL_MARKERS = ("unified-search",)
+
+
+def is_search_api_url(url: str) -> bool:
+    return any(m in (url or "") for m in SEARCH_API_URL_MARKERS)
+
+
+class SearchApiCapture:
+    """Engine-agnostic store of captured search-API payloads."""
+
+    def __init__(self) -> None:
+        self.payloads: List[Any] = []
+        self.status: Optional[str] = None  # context.status of the latest payload
+
+    def add(self, body: Any) -> bool:
+        """Accept a decoded JSON object or its raw text; ignore anything that
+        isn't JSON or carries no itinerary-shaped list. Returns True if kept."""
+        if isinstance(body, (bytes, str)):
+            try:
+                body = json.loads(body)
+            except (ValueError, TypeError):
+                return False
+        if not _find_itinerary_lists(body):
+            return False
+        self.payloads.append(body)
+        ctx = body.get("context") if isinstance(body, dict) else None
+        self.status = ctx.get("status") if isinstance(ctx, dict) else None
+        return True
+
+    @property
+    def incomplete(self) -> bool:
+        return self.status == "incomplete"
+
+    def parse(self, **kwargs) -> SearchResult:
+        """Products from every payload so far; a later poll's row replaces an
+        earlier one with the same sku (prices get refreshed while polling)."""
+        by_sku: Dict[str, Product] = {}
+        for body in self.payloads:
+            try:
+                res = parse_search_json(body, **{**kwargs, "max_results": None})
+            except Exception as exc:  # noqa: BLE001 — same rule as safe_parse_search_results
+                log.error("A captured search-API payload failed to parse — skipping it: %s", exc)
+                continue
+            for p in res.products:
+                by_sku[p.sku] = p
+        products = list(by_sku.values())
+        if kwargs.get("max_results"):
+            products = products[: kwargs["max_results"]]
+        return SearchResult(products=products, source_used="search_api" if products else "none")
+
+
+def combine_results(api: SearchResult, html: SearchResult) -> SearchResult:
+    """One round's rows: captured search-API rows first (the real source),
+    then any HTML-derived rows whose sku the API didn't already cover."""
+    if not api.products:
+        return html
+    skus = {p.sku for p in api.products}
+    extra = [p for p in html.products if p.sku not in skus]
+    return SearchResult(products=api.products + extra, source_used=api.source_used)
+
+
 def parse_search_results(
     html: str, *, origin: str, destination: str, depart_date: str,
     return_date: Optional[str] = None, adults: int = 1, currency: str = "USD",

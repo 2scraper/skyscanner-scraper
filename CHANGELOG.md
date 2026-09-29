@@ -9,6 +9,24 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Added — 2026-09-29, all three engines capture the `web-unified-search` XHR
+- The flight list is never in the initial HTML; the page fetches it from
+  `web-unified-search` and re-polls while `context.status` is
+  "incomplete". Playwright and pyppeteer hook `page.on("response")`;
+  Selenium reads Chrome's performance log and fetches bodies with
+  `Network.getResponseBody`. Shared logic: `flight_parser.SearchApiCapture`
+  / `combine_results` — API rows first, HTML rows only for uncovered skus.
+- A later poll refreshes the price of rows already collected, and an
+  unchanged round is not counted as a stall while the search is still
+  incomplete.
+- `--dump-html` also writes the last captured body to
+  `<out>_search_api_debug.json` (gitignored: it carries session tokens).
+- Verified end-to-end for Playwright on a local stand that polls the real
+  fixture twice (incomplete → complete, price refreshed). pyppeteer and
+  Selenium are not installed here: covered by compile + a fake-driver
+  smoke check only. Not yet seen against the live site (PerimeterX).
+- `--scraper-api` returns HTML only and cannot see the XHR.
+
 ### Fixed — 2026-09-29, parser verified against the first REAL skyscanner capture
 - Roman captured a real `web-unified-search` XHR body in his own Chrome
   (LHR→JFK, 2026-11-15, 373 itineraries). The generic list walk found the

@@ -246,6 +246,69 @@ def _():
     assert res.products[1].sku != res.products[2].sku, "codeshare pair (same times, different flight numbers) must not collide"
 
 
+def _real_fixture() -> dict:
+    return json.loads((Path(__file__).parent / "fixtures" / "web_unified_search_lhr_jfk_trimmed.json").read_text())
+
+
+_Q = dict(origin="LHR", destination="JFK", depart_date="2026-11-15")
+
+
+@check("SearchApiCapture: ignores non-JSON/irrelevant bodies, tracks 'incomplete', a later poll refreshes a row's price")
+def _():
+    import copy
+    cap = fp.SearchApiCapture()
+    assert not cap.add("<html>not json</html>") and not cap.add('{"context": {"status": "complete"}}')
+    results = _real_fixture()["itineraries"]["results"]
+    assert cap.add(json.dumps({"context": {"status": "incomplete"}, "itineraries": {"results": results[:1]}}))
+    assert cap.incomplete
+    refreshed = copy.deepcopy(results[0]); refreshed["price"]["raw"] = 299.99
+    assert cap.add({"context": {"status": "complete"}, "itineraries": {"results": [refreshed] + results[1:]}})
+    assert not cap.incomplete
+    res = cap.parse(**_Q)
+    assert res.source_used == "search_api" and len(res.products) == 3
+    assert res.products[0].price == 299.99, "the later poll's price must win"
+
+
+@check("combine_results: search-API rows first, HTML rows added only for skus the API didn't cover")
+def _():
+    api = fp.parse_search_json(_real_fixture(), **_Q)
+    api = fp.SearchResult(products=api.products, source_used="search_api")
+    html = fp.parse_search_results(_synthetic_next_data_html(2), origin="LHR", destination="JFK", depart_date="2026-09-15")
+    both = fp.combine_results(api, html)
+    assert both.source_used == "search_api" and len(both.products) == 5
+    assert both.products[:3] == api.products
+    empty = fp.SearchResult(products=[], source_used="none")
+    assert fp.combine_results(empty, html) is html
+
+
+@check("selenium _drain_search_api_responses: reads matching bodies from a fake performance log, including base64 and a body finished in a later drain")
+def _():
+    import base64 as b64
+    import selenium_scraper as ss
+    payload = json.dumps(_real_fixture())
+    ev = lambda method, **params: {"message": json.dumps({"message": {"method": method, "params": params}})}
+    rr = lambda rid, url: ev("Network.responseReceived", requestId=rid, response={"url": url, "status": 200})
+
+    class FakeDriver:
+        def __init__(self): self.batches = [
+            [rr("1", "https://x/g/radar/api/v2/web-unified-search/"), rr("2", "https://x/analytics"),
+             ev("Network.loadingFinished", requestId="2"), rr("3", "https://x/web-unified-search/")],
+            [ev("Network.loadingFinished", requestId="1"), ev("Network.loadingFinished", requestId="3")],
+        ]
+        def get_log(self, kind): return self.batches.pop(0) if self.batches else []
+        def execute_cdp_cmd(self, cmd, params):
+            assert params["requestId"] in ("1", "3"), "only search-API bodies may be fetched"
+            if params["requestId"] == "3":
+                return {"body": b64.b64encode(payload.encode()).decode(), "base64Encoded": True}
+            return {"body": payload, "base64Encoded": False}
+
+    cap, pending, drv = fp.SearchApiCapture(), set(), FakeDriver()
+    ss._drain_search_api_responses(drv, cap, pending)
+    assert cap.payloads == [] and pending == {"1", "3"}
+    ss._drain_search_api_responses(drv, cap, pending)
+    assert len(cap.payloads) == 2 and pending == set()
+
+
 @check("safe_parse_search_results degrades a parse exception to an empty result, never propagates (mirrors the family's per-worker-page crash fix)")
 def _():
     import unittest.mock as mock

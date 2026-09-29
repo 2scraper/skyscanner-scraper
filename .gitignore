@@ -6,6 +6,7 @@ __pycache__/
 *.json.meta.json
 _smoke_roundtrip.env
 *_debug.html
+*_debug.json
 .DS_Store
 
 # A --cookies-file is a real, live session (PerimeterX validation cookies,
