@@ -9,10 +9,12 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
-## [1.1.0] — 2026-09-29
+## [1.0.0] — 2026-09-29
 
-First tagged release (1.0.0 below was never tagged). **Behaviour changes
-you may notice coming from 1.0.0**, each explained in its entry below:
+First release. It covers the initial build (2026-09-16, never released on
+its own — its entry is at the end of this section) and everything since.
+**Where this release behaves differently from that initial build**, each
+explained in its entry below:
 - Flights now come from the `web-unified-search` XHR (`price_source:
   search_api`); row `currency` is what the data states or `null` — never
   the requested `--currency`.
@@ -633,9 +635,9 @@ you may notice coming from 1.0.0**, each explained in its entry below:
   this repo. The two repos' exit-code contracts now diverge on this one
   case; worth fixing in `stockx-scraper` too for family consistency.
 
-## [1.0.0] — 2026-09-16
+### Initial build — 2026-09-16 (never released on its own)
 
-Initial release — a family-grade rebuild of an earlier single-file draft,
+A family-grade rebuild of an earlier single-file draft,
 matching the architecture, output contract, and CI shape of this family's
 `stockx-scraper`.
 

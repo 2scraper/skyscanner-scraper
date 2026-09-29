@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skyscanner-scraper"
-version = "1.1.0"
+version = "1.0.0"
 description = "skyscanner.com flight-search scraper (Playwright, Selenium, Puppeteer, or 2Captcha's Scraping Browser API via CDP) — local-first, embedded-JSON + DOM parsing, captcha solving, proxies, fingerprints"
 readme = "README.md"
 requires-python = ">=3.9"
