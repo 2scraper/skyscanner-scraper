@@ -70,11 +70,13 @@ MIN_CARD_MATCHES = 2  # per family invariant (see stockx-scraper's product_parse
 # `empty`) — the two markers below are added anyway, as durable,
 # locale-independent, skyscanner-specific corroboration of the SAME
 # incident, not a replacement for the generic check:
-#   - `px-cloud.net` — the PerimeterX-hosted script/iframe host this page
-#     loaded from (`client.px-cloud.net`, `js.px-cloud.net`).
-#   - `js.skyscnr.com/sttc/px/` — skyscanner's OWN asset host serving
+#   - `/sttc/px/captcha-v2/` — skyscanner's OWN asset path serving
 #     PerimeterX's captcha artwork (`.../sttc/px/captcha-v2/captcha-01.svg`),
 #     which a genuine results page has no reason to reference.
+# `px-cloud.net` was a marker here until 2026-09-29 and was REMOVED: it is
+# the host of PerimeterX's background sensor (a `js.px-cloud.net` iframe),
+# which a real, unchallenged skyscanner page (2026-09-22 capture) also
+# loads — so it flagged every normal page as blocked.
 # What this incident does NOT confirm: `flight_parser.py`'s selectors
 # below (`# TODO: verify live`) — this was a block page, not a results
 # page, so the actual parsing logic is still unverified. See TESTING.md
@@ -84,8 +86,7 @@ MIN_CARD_MATCHES = 2  # per family invariant (see stockx-scraper's product_parse
 # `--cdp-endpoint` run relies entirely on the Scraping Browser API's own
 # auto-solve extension for this one, not on this repo's manual solver.
 BOT_CHALLENGE_MARKERS: tuple = (
-    "px-cloud.net",
-    "js.skyscnr.com/sttc/px/",
+    "/sttc/px/captcha-v2/",
 )
 
 

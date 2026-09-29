@@ -341,6 +341,18 @@ def _():
     assert any(m in real_block_page_fragment for m in captcha_solver.GENERIC_BOT_CHALLENGE_MARKERS)
 
 
+@check("a real UNCHALLENGED skyscanner page (PerimeterX's background sensor iframe only) is NOT detected as a challenge")
+def _():
+    # Verbatim shape from the 2026-09-22 capture of a normal page: the
+    # sensor loads on every page, so its hosts must never count as a block.
+    real_normal_page_fragment = (
+        '<script type="text/javascript" src="/rf8vapwA/init.js" async=""></script>'
+        '<iframe src="https://js.px-cloud.net/?t=d-imii6udzm-1790065662670&amp;v=6ed92573"></iframe>'
+        '<h1>Cheap flights from London to New York</h1>'
+    )
+    assert not captcha_solver.detect_from_html(real_normal_page_fragment, fp.BOT_CHALLENGE_MARKERS)
+
+
 # --------------------------------------------------------------------------- #
 # captcha_solver — reused verbatim from the family, site-agnostic
 # --------------------------------------------------------------------------- #
