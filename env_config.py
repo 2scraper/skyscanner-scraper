@@ -92,11 +92,21 @@ def _read_dotenv(path: Path) -> Dict[str, str]:
     return out
 
 
-def load_dotenv_values(dotenv_path: str = ".env") -> Dict[str, str]:
-    return _read_dotenv(Path(dotenv_path))
+# CLAUDE.md §3: "Credentials live in .env next to the scripts" — not in
+# whatever directory the command happened to be run from.
+DEFAULT_DOTENV = Path(__file__).resolve().parent / ".env"
+
+# A route given explicitly beats a URL from the environment: SKYSCANNER_URL
+# in .env would otherwise send EVERY --origin/--destination (and every
+# batch_scraper route) to the same saved search.
+_ROUTE_DESTS = ("origin", "destination", "depart_date")
 
 
-def apply_env(args: argparse.Namespace, dotenv_path: str = ".env") -> argparse.Namespace:
+def load_dotenv_values(dotenv_path: Optional[str] = None) -> Dict[str, str]:
+    return _read_dotenv(Path(dotenv_path) if dotenv_path else DEFAULT_DOTENV)
+
+
+def apply_env(args: argparse.Namespace, dotenv_path: Optional[str] = None) -> argparse.Namespace:
     """Fill UNSET argparse destinations from the environment, then `.env`.
 
     A destination counts as "unset" only when it is still at its argparse
@@ -106,6 +116,8 @@ def apply_env(args: argparse.Namespace, dotenv_path: str = ".env") -> argparse.N
     dotenv_values = load_dotenv_values(dotenv_path)
     for env_key, dest in ENV_KEYS.items():
         if not hasattr(args, dest) or getattr(args, dest) not in (None, ""):
+            continue
+        if dest == "url" and all(getattr(args, d, None) for d in _ROUTE_DESTS):
             continue
         # exported environment variable outranks .env
         value = os.environ.get(env_key)
@@ -136,13 +148,12 @@ def apply_env(args: argparse.Namespace, dotenv_path: str = ".env") -> argparse.N
 def _mask(value: Optional[str]) -> str:
     if not value:
         return "(not set)"
-    if len(value) <= 8:
-        return "*" * len(value)
-    return f"{value[:4]}…{value[-2:]} ({len(value)} chars)"
+    # Length only: even a prefix of a key is part of the key.
+    return f"set ({len(value)} chars)"
 
 
 def _report() -> None:
-    dotenv_values = load_dotenv_values(".env")
+    dotenv_values = load_dotenv_values()
     print("env_config: what this process would pick up (values never printed)\n")
     for env_key, dest in ENV_KEYS.items():
         in_env = env_key in os.environ and not _is_placeholder(os.environ.get(env_key))

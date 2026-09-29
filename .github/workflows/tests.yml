@@ -39,23 +39,13 @@ jobs:
           assert header == PRODUCT_FIELD_NAMES
           print('sample_output OK')
           "
-      - name: No committed credentials
+      - name: No committed credentials or banned wording (tree and full history)
+        # repo_scan.py is the same implementation smoke_test.py runs; it
+        # tolerates JSON-escaped quotes and scans smoke_test.py too (fake
+        # test credentials carry an explicit marker instead of an exemption).
         run: |
-          set +e
-          # smoke_test.py deliberately contains fake-credential-SHAPED
-          # fixtures (e.g. api_key="topsecretkey123") to test the masking/
-          # redaction logic itself — excluded alongside .env.example, not a
-          # loosening of the check against real leaks (same exclusion
-          # stockx-scraper's tests.yml applies to its own smoke_test.py).
-          MATCHES=$(grep -rnE "(api[_-]?key|TWOCAPTCHA_KEY|SKYSCANNER_PROXY)\s*=\s*['\"][A-Za-z0-9]{10,}" \
-            --include="*.py" --include="*.md" --include="*.env*" . | grep -vE "\.env\.example|smoke_test\.py")
-          set -e
-          if [ -n "$MATCHES" ]; then
-            echo "$MATCHES"
-            echo "::error::possible committed credential — see matches above"
-            exit 1
-          fi
-          echo "no committed credentials found"
+          python3 repo_scan.py
+          python3 repo_scan.py --history
 
   docker:
     name: docker image builds, runs, and launches Chromium

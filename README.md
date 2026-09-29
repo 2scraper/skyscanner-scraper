@@ -79,8 +79,11 @@ pip install -r requirements-selenium.txt                                    # ne
 pip install -r requirements-puppeteer.txt                                   # pyppeteer — see its own warning below
 ```
 
-Copy `.env.example` to `.env` — leave it blank for a normal first run (see
-"Local-first" above) and fill in what you use later. `python3 env_config.py`
+Copy `.env.example` to `.env` **next to the scripts** (it is read from there,
+whatever directory you run from) — leave it blank for a normal first run
+(see "Local-first" above) and fill in what you use later. An exported
+variable still wins over `.env`, and an explicit `--origin/--destination/
+--depart-date` wins over a saved `SKYSCANNER_URL`. `python3 env_config.py`
 shows what was picked up without ever printing a secret.
 
 ## Usage
@@ -236,6 +239,15 @@ rather than a multi-page listing:
   mean tearing down the browser context holding every itinerary scrolled
   into view so far, which is strictly worse than not rotating: it throws
   away already-collected results to switch an exit that was working fine.
+- **`--delay`**: the family's pause between page fetches. Here there is one
+  page per search; the equivalents are `--scroll-delay` (between scroll
+  rounds) and `batch_scraper.py --route-delay` (between searches).
+- **`--locale`**: not added, because nothing measured says it would work.
+  The market is picked by the site's own geo-redirect (measured 2026-09-29:
+  `skyscanner.com` → `ru.skyscanner.com` → `skyscanner.net` for one exit),
+  and `--currency` only sets the query parameter; the row's `currency` is
+  whatever the data states. Whether a browser locale changes the market is
+  untested — a TODO, not a decision.
 
 ### What this repo deliberately does NOT apply from a fingerprint
 
@@ -286,25 +298,28 @@ here is a deterministic fingerprint of the itinerary (route, dates,
 airline, times, cabin class — everything except price), so the same
 itinerary scraped on two different days gets the same `sku` and
 `diff_runs.py` reports a real price change instead of one result
-disappearing and an unrelated one appearing. `brand` carries the
-operating airline. `category` is always `"flights"` — there's no separate
-listing category on this site the way there is on a marketplace.
-`price_source` is `embedded_json` or `dom`, mirroring which extraction
-path actually produced the row (see `flight_parser.py`) — never a
-defaulted guess. See `sample_output.json` / `sample_output.csv` — **these
-are a clearly fictional illustration of the schema** ("Fictional Air" /
-"Sample Airways"), not a real capture, unlike stockx-scraper's own sample
-output — see "Read this before trusting a run" above for why no real one
-exists yet.
+disappearing and an unrelated one appearing (segment flight numbers are
+part of it, so codeshares do not collide). `brand` is the first leg's
+marketing airline. `category` is always `"flights"`. `currency` is the one
+the data states (the deeplink's market currency) or `null` — never the
+requested `--currency`. `price_source` is `search_api` (the XHR),
+`embedded_json` or `dom`, whichever path produced the row. `sample_output.json`
+/ `.csv` are cut from the real capture in `fixtures/` (3 itineraries,
+LHR→JFK, 2026-09-29) by the same parser and writer a run uses.
 
 **Exit codes**: `0` complete · `1` crash · `2` bad usage · `3` blocked ·
-`4` zero itineraries (and nothing was written) · `5` remote API error ·
-`6` partial. Every completed/partial run writes a `<out>.meta.json`
-sidecar with `status`, `pages_completed` (scroll rounds, here),
-`failed_pages` and `price_confirmed_pct` — **except** a
-failed/empty/blocked/remote-API-error run, which writes no sidecar and no
-output at all, so it can never overwrite a previous good run
-(`--allow-empty` opts out of the "don't write an empty result" half of
+`4` zero itineraries (and nothing was written) · `5` the content was never
+obtained (remote API error, navigation failure, dead proxy) · `6` partial.
+Every completed/partial run writes a `<out>.meta.json` sidecar with
+`status`, `stop_reason`, `pages_completed` (scroll rounds, here),
+`failed_pages`, `price_confirmed_pct`, and the site's own arithmetic:
+`results_source`, `search_api_status`, `itineraries_available`,
+`capped_by_max_results`. So `complete` with `stop_reason: max_results`
+means "we took 30 of the 389 the site offered"; a run that stopped while
+the search API still said `incomplete` is `partial` (`stop_reason:
+search_incomplete`). A failed/empty/blocked/never-obtained run writes no
+sidecar and no output at all, so it can never overwrite a previous good
+run (`--allow-empty` opts out of the "don't write an empty result" half of
 that guard only).
 
 ## Pagination
@@ -351,6 +366,10 @@ site):
 
 ## Known limitations
 
+- **A dead proxy ends the run (exit 5) instead of rotating within it.**
+  The engines recognise `ERR_PROXY_CONNECTION_FAILED` and friends, mark the
+  exit dead in the pool and stop retrying it; the next run takes the next
+  proxy. Rotating to a fresh browser mid-run is not implemented.
 - **Round trips carry the outbound leg only.** A row's `departure_time` /
   `arrival_time` / `duration` / `stops` describe the first leg; the return
   leg is in the XHR but not in the output schema yet.

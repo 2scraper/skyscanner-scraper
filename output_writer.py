@@ -244,8 +244,12 @@ def finish_run(
     # caller also passed --allow-empty, and it must never do so just
     # because SOME batches did return results while the run was, in fact,
     # blocked partway through.
-    if remote_api_error:
+    # CLAUDE.md §9: 5 means "the content was never obtained" — a run that
+    # gathered rows and THEN hit a remote error is partial (6), not 5.
+    if remote_api_error and zero_products:
         status, exit_code = "remote_api_error", EXIT_REMOTE_API_ERROR
+    elif remote_api_error:
+        status, exit_code = "partial", EXIT_PARTIAL
     elif blocked:
         status, exit_code = "blocked", EXIT_BLOCKED
     elif zero_products:

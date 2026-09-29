@@ -9,6 +9,38 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed — 2026-09-29, template audit: pre-publication hygiene
+- `repo_scan.py`: one credential + wording scan run by CI (tree AND full
+  git history) and by `smoke_test.py`. It tolerates JSON-escaped quotes
+  (a key inside a fixture), catches bare 32-hex keys and URL credentials,
+  scans `smoke_test.py` too (fake test credentials carry a marker), and
+  checks the family's banned wording (§12) plus capability over-claims
+  (§19, CHANGELOG history exempt). Controls plant each shape and must be
+  found. History scan: clean (the only hits were two fake test passwords).
+- `.gitignore` rebuilt from the template: `.env*` (was `.env` by name —
+  `.env.bak` was not ignored), `*.json`/`*.csv` with explicit exceptions,
+  `skyscanner_results.*`, editor/build/cache dirs, `*.key`, `secrets*`.
+- `cf-turnstile` dropped from the generic markers (§8); a check pins that
+  it alone is no detection while `challenges.cloudflare.com` is.
+- `sample_output.*` are now cut from the real fixture (were "Fictional Air").
+- canary: both live jobs SKIP with a notice unless their secret is set
+  (every measured automated run from a datacentre was challenged), and
+  when they run, `.github/canary_assert.py` asserts exit 0, `complete`,
+  `results_source == search_api`, ≥50 itineraries, ≥95% priced and with a
+  currency. Checked against a live run (361 itineraries → pass) and
+  controls (exit 3, 30 rows, no sidecar → fail).
+- `.env` is read next to the scripts, not from the CWD (§3); an explicit
+  route beats a saved `SKYSCANNER_URL` (batch routes all went to one URL);
+  `env_config.py`'s report prints a value's length only (it printed the
+  first 4 and last 2 characters); `batch_scraper`'s fallback check ignores
+  placeholders; `python-dotenv` is no longer a hard dependency.
+- A remote error after rows were gathered is partial (6), not 5 (§9).
+- A dead proxy is recognised in all three engines (Playwright did not),
+  marked dead, and not retried; exit 5 in ~1 s (verified, all engines).
+- `--stealth` is ignored over `--cdp-endpoint` (§8); the "Ignoring
+  --fingerprint" warning only appears when `--fingerprint` was passed.
+- `smoke_test.py` prints which engines it exercised and which it skipped.
+
 ### Corrected — 2026-09-29, capability wording (template §19)
 - Earlier entries below call the PerimeterX gap "CONFIRMED PERMANENT" and
   say 2Captcha has "no automated task type" for PerimeterX, DataDome or a

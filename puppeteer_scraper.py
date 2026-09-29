@@ -445,7 +445,9 @@ async def scrape_search(
             dead = is_proxy_dead_error(message)
             if proxy_pool is not None and proxy is not None and dead:
                 proxy_pool.report_failure(proxy, dead=True)
-                log.warning("Proxy reported dead: %s", message)
+                log.warning("Proxy %s is dead (%s) — not retrying the same exit; a rerun takes the next one from the pool.",
+                            proxy.masked(), message)
+                break  # CLAUDE.md §8: a dead proxy wants a different exit, not another try at this one
             else:
                 log.warning("Navigation attempt %d/%d failed: %s", attempt + 1, args.retries + 1, message)
             if attempt < args.retries:
@@ -718,7 +720,13 @@ async def run(args: argparse.Namespace) -> int:
     autosolve = bool(args.cdp_endpoint) and args.solve_captcha != "off"
 
     user_agent = None
-    cdp_refused_fingerprint = refuse_if_cdp(args.cdp_endpoint)
+    cdp_refused_fingerprint = bool(args.fingerprint) and refuse_if_cdp(args.cdp_endpoint)
+    if args.stealth and args.cdp_endpoint:
+        # CLAUDE.md §8: never layer our own fingerprint patches over a CDP
+        # browser — it brings its own identity (the Scraping Browser's, or
+        # your real Chrome's), and a patched half of one is a contradiction.
+        log.warning("Ignoring --stealth: a --cdp-endpoint browser already has its own identity.")
+        args.stealth = False
     if args.fingerprint and not cdp_refused_fingerprint:
         if client is None:
             log.warning("--fingerprint requested but no --twocaptcha-key/TWOCAPTCHA_KEY set — continuing without one.")

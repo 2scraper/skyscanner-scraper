@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements-playwright.txt \
 COPY env_config.py proxy_pool.py output_writer.py captcha_solver.py \
      fingerprint_client.py scraper_api_client.py diff_runs.py \
      flight_parser.py playwright_scraper.py puppeteer_scraper.py \
-     selenium_scraper.py batch_scraper.py smoke_test.py ./
+     selenium_scraper.py batch_scraper.py smoke_test.py repo_scan.py ./
 # smoke_test.py also reads these straight off disk (the ENV_KEYS<->
 # .env.example sync check and the sample-output-schema check) — missing
 # any one crashes the build the same way the two .py files above would.
@@ -37,7 +37,7 @@ RUN python3 smoke_test.py
 # .env (a .env was never COPYed here in the first place; this is the "no
 # test suite / no fixtures" half of that same rule). Strip them from the
 # final layer rather than leaving them in a published image.
-RUN rm -rf smoke_test.py tests fixtures
+RUN rm -rf smoke_test.py repo_scan.py tests fixtures
 
 ENTRYPOINT ["python3", "playwright_scraper.py"]
 CMD ["--help"]

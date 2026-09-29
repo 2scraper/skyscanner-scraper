@@ -48,7 +48,12 @@ from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptcha
 # Generic signals any family site might show. A per-site BOT_CHALLENGE_MARKERS
 # list (product_parser.py) is unioned with this, never a replacement for it.
 GENERIC_BOT_CHALLENGE_MARKERS: Sequence[str] = (
-    "cf-turnstile", "challenges.cloudflare.com", "cdn-cgi/challenge-platform",
+    # No "cf-turnstile" (CLAUDE.md §8): the Scraping Browser's extension
+    # injects it into good pages, and measured on sibling repos it missed
+    # real Cloudflare challenges. `challenges.cloudflare.com` is on every
+    # real challenge and on no served page. (identify_widget() still uses
+    # the class to read a Turnstile sitekey once something was detected.)
+    "challenges.cloudflare.com", "cdn-cgi/challenge-platform",
     "g-recaptcha", "recaptcha/api.js", "grecaptcha",
     "h-captcha", "hcaptcha.com/1/api.js",
     "px-captcha", "perimeterx",
@@ -102,6 +107,8 @@ class CaptchaSignal:
 # logged as a confusing "captcha-like marker detected but no known
 # widget/sitekey" rather than a clean "no captcha present". Stripped here
 # so the extension's own always-there code never counts as the page's.
+# Still needed after dropping "cf-turnstile": the reCAPTCHA hunter's
+# attributes can carry "g-recaptcha", which IS in the marker set.
 _EXTENSION_SCRIPT_RE = re.compile(
     r'<script\b[^>]*\bchrome-extension://[^>]*>.*?</script>', re.I | re.S
 )
@@ -124,7 +131,7 @@ def detect_from_html(html: str, extra_markers: Sequence[str] = ()) -> bool:
 
 # Markers whose VENDOR is known but for which THIS REPO builds no solve
 # task (see the module docstring for what 2Captcha itself documents —
-# this is a TODO list, not a claim that these cannot be solved). Checked
+# this is a TODO list, not a statement about the vendor's product). Checked
 # ONLY after `identify_widget()` returned None for a marker that DID match,
 # so a real Turnstile / reCAPTCHA / hCaptcha widget never lands here.
 _UNSUPPORTED_VENDOR_MARKERS = {

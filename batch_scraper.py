@@ -140,9 +140,15 @@ def launch_local_chrome(endpoint: str, profile: str, wait_s: float = 15.0) -> bo
     return False
 
 
-def fallback_configured(dotenv_path: str = ".env") -> bool:
+def fallback_configured(dotenv_path: Optional[str] = None) -> bool:
+    """True when .env/the environment holds a REAL 2Captcha exit (a blank
+    or `{...}` placeholder copied from .env.example does not count)."""
     env = env_config.load_dotenv_values(dotenv_path)
-    return any(os.environ.get(k) or env.get(k) for k in ("SKYSCANNER_CDP_ENDPOINT", "SKYSCANNER_PROXY"))
+    for key in ("SKYSCANNER_CDP_ENDPOINT", "SKYSCANNER_PROXY"):
+        value = os.environ.get(key) or env.get(key)
+        if value and not env_config._is_placeholder(value):
+            return True
+    return False
 
 
 @dataclass

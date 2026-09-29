@@ -86,29 +86,32 @@ def _():
         assert marker in src, f"{path}: missing guarded driver import"
 
 
-@check("no forbidden overclaiming wording in any shipped .py/.md file")
+@check("repo_scan: no credential-shaped strings and no banned wording in any shipped file (smoke_test.py included), and both scans can fail")
 def _():
-    # Generic guard (no family CLAUDE.md banned-wording list is available
-    # for this repo — see the top-level session notes) against the kind of
-    # overclaim this family's own README/docstrings consistently avoid:
-    # "guaranteed", "100% undetectable", "bypass all", "never gets
-    # blocked". Absence proven here, not lifted from a document this repo
-    # doesn't have a copy of.
-    banned = ("undetectable", "100% success", "bypass all", "never gets blocked", "guaranteed to work")
-    # smoke_test.py itself is excluded — it's the file that DEFINES this
-    # banned list, so the list literal above would always self-match
-    # (same class of fix as stockx-scraper's tests.yml excluding
-    # smoke_test.py's own fixture strings from the credential-scan grep).
-    for path in ROOT.glob("*.py"):
-        if path.name == "smoke_test.py":
-            continue
-        text = path.read_text(encoding="utf-8").lower()
-        for word in banned:
-            assert word not in text, f"{path.name} contains banned wording {word!r}"
-    for path in ROOT.glob("*.md"):
-        text = path.read_text(encoding="utf-8").lower()
-        for word in banned:
-            assert word not in text, f"{path.name} contains banned wording {word!r}"
+    import repo_scan
+    files = repo_scan.shipped_files(ROOT)
+    assert len(files) > 5, f"the scan saw only {len(files)} files — it would pass for the wrong reason"
+    creds, words = repo_scan.credential_findings(files, ROOT), repo_scan.wording_findings(files, ROOT)
+    assert not creds, creds
+    assert not words, words
+    # Controls, planted in a temp dir: a key inside a JSON fixture's ESCAPED
+    # quotes (CLAUDE.md §24), a bare 32-hex key, URL credentials, a §12
+    # phrase and a §19 claim outside CHANGELOG.md — each must be found.
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "f.json").write_text('{"body": "{\\"apiKey\\": \\"Ab12Cd34Ef56Gh78Ij90\\"}"}', encoding="utf-8")
+        (root / "k.py").write_text("K = '" + "0123456789abcdef" * 2 + "'\n", encoding="utf-8")
+        (root / "u.md").write_text("ws://realuser:" + "hunter2x@host:9222\n", encoding="utf-8")
+        (root / "w.md").write_text("A " + "cloud" + " browser here. Confirmed " + "permanent.\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("Old entry: confirmed " + "permanent.\n", encoding="utf-8")
+        planted = sorted(root.iterdir())
+        c = repo_scan.credential_findings(planted, root)
+        w = repo_scan.wording_findings(planted, root)
+        assert any(x.startswith("f.json") for x in c), c
+        assert any(x.startswith("k.py") for x in c), c
+        assert any(x.startswith("u.md") for x in c), c
+        assert sum(x.startswith("w.md") for x in w) == 2, w
+        assert not any(x.startswith("CHANGELOG.md") for x in w), "CHANGELOG history is exempt from the §19 list only"
 
 
 # --------------------------------------------------------------------------- #
@@ -387,6 +390,12 @@ def _():
     assert any(m in real_block_page_fragment for m in captcha_solver.GENERIC_BOT_CHALLENGE_MARKERS)
 
 
+@check("cf-turnstile alone (e.g. the Scraping Browser extension's attribute on a good page) is not a detection; challenges.cloudflare.com is")
+def _():
+    assert not captcha_solver.detect_from_html('<input name="cf-turnstile-response"><h1>Flights</h1>')
+    assert captcha_solver.detect_from_html('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>')
+
+
 @check("a real UNCHALLENGED skyscanner page (PerimeterX's background sensor iframe only) is NOT detected as a challenge")
 def _():
     # Verbatim shape from the 2026-09-22 capture of a normal page: the
@@ -521,7 +530,7 @@ def _():
 # --------------------------------------------------------------------------- #
 @check("proxy formats parse; credentials never appear in the masked/server-only strings")
 def _():
-    p1 = proxy_pool.parse_proxy_line("http://alice:s3cr3t@1.2.3.4:8080")
+    p1 = proxy_pool.parse_proxy_line("http://alice:s3cr3t@1.2.3.4:8080")  # scan: fake-credential
     assert p1.host == "1.2.3.4" and p1.port == 8080 and p1.login == "alice" and p1.password == "s3cr3t"
     p2 = proxy_pool.parse_proxy_line("1.2.3.4:8080:bob:hunter2")
     assert p2.login == "bob" and p2.password == "hunter2"
@@ -559,8 +568,8 @@ def _():
 @check("redact_credentials scrubs URL userinfo AND key/token params, globally")
 def _():
     message = (
-        "connect_over_cdp failed: ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222 "
-        "Call log:\n - ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222\n"
+        "connect_over_cdp failed: ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222 "  # scan: fake-credential
+        "Call log:\n - ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222\n"  # scan: fake-credential
         "  clientKey=abcdEF123 also leaked here"
     )
     redacted = proxy_pool.redact_credentials(message)
@@ -574,7 +583,7 @@ def _():
     import asyncio
     import unittest.mock as mock
 
-    bad_endpoint = "ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222"
+    bad_endpoint = "ws://scanner123-zone-scraping_browser:secretpass@cb.2captcha.com:9222"  # scan: fake-credential
 
     class _FakePW:
         class chromium:
@@ -1286,6 +1295,36 @@ def _():
     assert any("fixtures/" in g for g in _docker_image_gaps(dockerfile, dockerignore.replace("!fixtures/*.json\n", "")))
 
 
+@check("finish_run: a remote error AFTER rows were gathered is partial (6); with no rows it is 5 (CLAUDE.md §9)")
+def _():
+    with tempfile.TemporaryDirectory() as d:
+        row = fp.parse_search_json(_real_fixture(), origin="LHR", destination="JFK", depart_date="2026-11-15").products[:1]
+        kw = dict(fmt="json", engine="t", url="u", pages_requested=2, pages_completed=1, failed_pages=None,
+                  blocked=False, remote_api_error=True, allow_empty=False, started_at=0.0)
+        assert output_writer.finish_run(products=row, out_path=str(Path(d) / "a.json"), **kw) == output_writer.EXIT_PARTIAL
+        assert output_writer.finish_run(products=[], out_path=str(Path(d) / "b.json"), **kw) == output_writer.EXIT_REMOTE_API_ERROR
+        assert not Path(d, "b.json").exists()
+
+
+@check("SKYSCANNER_URL from .env/the environment does not override an explicit route; _mask prints no part of a value")
+def _():
+    import os
+    import unittest.mock as mock
+    with tempfile.TemporaryDirectory() as d:
+        envf = Path(d) / ".env"
+        envf.write_text("SKYSCANNER_URL=https://www.skyscanner.com/transport/flights/aaa/bbb/261201/\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SKYSCANNER_URL", None)
+            routed = env_config.apply_env(playwright_scraper.build_arg_parser().parse_args(
+                ["--origin", "LHR", "--destination", "JFK", "--depart-date", "2026-11-15"]), dotenv_path=str(envf))
+            assert routed.url is None, "an explicit route must not be replaced by a saved URL"
+            bare = env_config.apply_env(playwright_scraper.build_arg_parser().parse_args([]), dotenv_path=str(envf))
+            assert bare.url and "aaa/bbb" in bare.url, "with no route given, SKYSCANNER_URL still applies"
+    secret = "abcdef" + "0123456789" * 3
+    masked = env_config._mask(secret)
+    assert secret[:2] not in masked and secret[-2:] not in masked and str(len(secret)) in masked, masked
+
+
 def run() -> int:
     """All @check-decorated functions above already ran at import time
     (that's the point — see the `check()` docstring) and self-registered
@@ -1293,6 +1332,15 @@ def run() -> int:
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     failed = [(n, d) for n, ok, d in RESULTS if not ok]
     print(f"smoke_test: {passed}/{len(RESULTS)} checks passed")
+    # Skips must be visible (CLAUDE.md §10): engine checks run only against
+    # the drivers installed in THIS environment.
+    engines = {"playwright": playwright_scraper._PLAYWRIGHT_IMPORT_ERROR,
+               "selenium": selenium_scraper._SELENIUM_IMPORT_ERROR,
+               "puppeteer": puppeteer_scraper._PYPPETEER_IMPORT_ERROR}
+    ran = [n for n, err in engines.items() if err is None]
+    skipped = [n for n, err in engines.items() if err is not None]
+    print(f"  engines exercised: {', '.join(ran) or 'none'}"
+          + (f"; SKIPPED (driver not installed here): {', '.join(skipped)}" if skipped else ""))
     for name, detail in failed:
         print(f"  FAIL: {name}\n        {detail}")
     return 0 if not failed else 1
