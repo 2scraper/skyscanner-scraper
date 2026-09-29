@@ -516,9 +516,10 @@ def scrape_search(
             dead = is_proxy_dead_error(message)
             if proxy_pool is not None and proxy is not None and dead:
                 proxy_pool.report_failure(proxy, dead=True)
-                log.warning("Proxy %s is dead (%s) — not retrying the same exit; a rerun takes the next one from the pool.",
-                            proxy.masked(), message)
-                break  # CLAUDE.md §8: a dead proxy wants a different exit, not another try at this one
+                log.warning("Proxy %s is dead (%s) — not retrying the same exit.", proxy.masked(), message)
+                if stats is not None:
+                    stats.setdefault("dead_proxies", []).append(proxy.masked())
+                break  # CLAUDE.md §8: a dead proxy wants a different exit (run() rotates), not another try
             else:
                 log.warning("Navigation attempt %d/%d failed: %s", attempt + 1, args.retries + 1, message)
             if attempt < args.retries:
@@ -639,8 +640,11 @@ def scrape_search(
         log.warning("A challenge/error was seen, but %d itineraries were collected — reporting the data, not a block.", len(merged))
         blocked = False
     if stats is not None:
+        dead = stats.get("dead_proxies")
         stats.clear()
         stats.update(fp.search_meta(capture, collected=len(merged), max_results=args.max_results))
+        if dead:
+            stats["dead_proxies"] = dead
         if stats["search_incomplete"]:
             log.warning("Stopped while the search was still incomplete (%s itineraries offered so far) — reporting partial.",
                         stats["itineraries_available"])
@@ -840,10 +844,19 @@ def run(args: argparse.Namespace) -> int:
                     )
                     time.sleep(args.retry_delay)
         else:
-            merged, blocked, remote_api_error, rounds, scroll_error = scrape_search(
-                args=args, start_url=start_url, proxy_pool=proxy_pool, client=client,
-                user_agent=user_agent, cookies=cookies, stats=search_stats,
-            )
+            # CLAUDE.md §8: a dead proxy wants a DIFFERENT exit, and a rotation
+            # is a fresh browser. One attempt per proxy in the pool at most.
+            rotations = len(proxy_pool) if proxy_pool else 1
+            for rotation in range(rotations):
+                dead_before = len(search_stats.get("dead_proxies", []))
+                merged, blocked, remote_api_error, rounds, scroll_error = scrape_search(
+                    args=args, start_url=start_url, proxy_pool=proxy_pool, client=client,
+                    user_agent=user_agent, cookies=cookies, stats=search_stats,
+                )
+                if not (remote_api_error and len(search_stats.get("dead_proxies", [])) > dead_before):
+                    break
+                if rotation < rotations - 1:
+                    log.warning("Rotating to the next proxy with a fresh browser (%d/%d).", rotation + 2, rotations)
         price_confirmed_pct = (sum(1 for p in merged if p.price is not None) / len(merged)) if merged else None
     except Exception:
         log.exception("Unhandled error — this is a crash, not a normal blocked/empty run")

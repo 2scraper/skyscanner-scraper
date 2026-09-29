@@ -390,6 +390,16 @@ def _():
     assert any(m in real_block_page_fragment for m in captcha_solver.GENERIC_BOT_CHALLENGE_MARKERS)
 
 
+@check("a challenge marker survives BOTH encodings (entity-escaped raw bytes and a browser's plain DOM) — CLAUDE.md §20")
+def _():
+    plain = '<img src="//js.skyscnr.com/sttc/px/captcha-v2/captcha-01.svg">'
+    escaped = '<img src="&#47;&#47;js.skyscnr.com&#47;sttc&#47;px&#47;captcha-v2&#47;captcha-01.svg">'
+    assert captcha_solver.detect_from_html(plain, fp.BOT_CHALLENGE_MARKERS)
+    assert captcha_solver.detect_from_html(escaped, fp.BOT_CHALLENGE_MARKERS)
+    # bounded: an escaped marker far beyond the prefix (inside a big results page) is not read as a block
+    assert not captcha_solver.detect_from_html("x" * (captcha_solver._UNESCAPE_PREFIX + 10) + escaped, fp.BOT_CHALLENGE_MARKERS)
+
+
 @check("cf-turnstile alone (e.g. the Scraping Browser extension's attribute on a good page) is not a detection; challenges.cloudflare.com is")
 def _():
     assert not captcha_solver.detect_from_html('<input name="cf-turnstile-response"><h1>Flights</h1>')

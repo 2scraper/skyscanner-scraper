@@ -9,6 +9,24 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed — 2026-09-29, audit follow-ups
+- **Dead proxy → rotation.** The earlier fix only stopped retrying a dead
+  exit and its log line claimed "a rerun takes the next one from the pool" —
+  false without `--proxy-shuffle` (the pool is rebuilt per process). All
+  three engines now repeat the search with the next proxy in a fresh
+  browser (§8), up to one attempt per proxy, and record `dead_proxies`
+  (masked) in the sidecar. Verified on a LAN stand through a local forward
+  proxy: dead → working, rows proxied, exit 0, all engines.
+- `diff_runs.py` refuses two runs of different searches (route, dates,
+  adults, cabin, sort) and flags capped runs (§21: "removed" may be outside
+  the slice). Checked on real runs.
+- Challenge markers survive entity-escaped HTML (§20): a bounded 64 KB
+  prefix is `html.unescape`d before matching; a check pins both spellings
+  and the bound. Real pages: both challenges detected, the normal page and
+  a 901 KB live results page not.
+- Measured and documented: no sponsored entries in the captured XHR
+  responses; row order is the site's own `score`.
+
 ### Fixed — 2026-09-29, template audit: pre-publication hygiene
 - `repo_scan.py`: one credential + wording scan run by CI (tree AND full
   git history) and by `smoke_test.py`. It tolerates JSON-escaped quotes

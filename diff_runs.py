@@ -47,6 +47,9 @@ def _index_by_sku(rows: List[dict]) -> Dict[str, dict]:
     return out
 
 
+_SEARCH_FIELDS = ("origin", "destination", "depart_date", "return_date", "adults", "cabin_class", "sort")
+
+
 def diff(old_path: str, new_path: str) -> dict:
     old_meta, new_meta = _load_meta(old_path), _load_meta(new_path)
     for label, meta in (("old", old_meta), ("new", new_meta)):
@@ -59,6 +62,17 @@ def diff(old_path: str, new_path: str) -> dict:
 
     old_rows, new_rows = _index_by_sku(_load_rows(old_path)), _index_by_sku(_load_rows(new_path))
     old_skus, new_skus = set(old_rows), set(new_rows)
+
+    # Two different searches (or orderings) share no meaning row-for-row: every
+    # itinerary would read as added/removed. Refuse rather than print noise.
+    for field in _SEARCH_FIELDS:
+        old_vals = {str(r.get(field)) for r in old_rows.values()}
+        new_vals = {str(r.get(field)) for r in new_rows.values()}
+        if old_rows and new_rows and old_vals != new_vals:
+            raise SystemExit(
+                f"error: refusing to diff — the runs differ in {field!r} "
+                f"({sorted(old_vals)} vs {sorted(new_vals)}); they are not the same search."
+            )
 
     added = sorted(new_skus - old_skus)
     removed = sorted(old_skus - new_skus)
@@ -77,7 +91,11 @@ def diff(old_path: str, new_path: str) -> dict:
         else:
             changed.append(entry)
 
+    capped = [label for label, meta in (("old", old_meta), ("new", new_meta)) if meta.get("capped_by_max_results")]
     return {
+        # CLAUDE.md §21: in a capped run "removed" can also mean "outside this
+        # run's slice", not delisted.
+        "capped_runs": capped,
         "added": added, "removed": removed,
         "changed": changed, "source_changed": source_changed,
         "old_count": len(old_rows), "new_count": len(new_rows),
@@ -103,6 +121,9 @@ def main() -> int:
         print(f"  removed:        {len(result['removed'])}")
         print(f"  price changed:  {len(result['changed'])}")
         print(f"  source_changed: {len(result['source_changed'])} (ignored by --fail-on-change)")
+        if result["capped_runs"]:
+            print(f"  note: {' and '.join(result['capped_runs'])} run was capped by --max-results — "
+                  f"'removed' may be outside that run's slice, not gone from the site")
 
     if args.fail_on_change and result["changed"]:
         return 1

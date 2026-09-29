@@ -366,10 +366,20 @@ site):
 
 ## Known limitations
 
-- **A dead proxy ends the run (exit 5) instead of rotating within it.**
-  The engines recognise `ERR_PROXY_CONNECTION_FAILED` and friends, mark the
-  exit dead in the pool and stop retrying it; the next run takes the next
-  proxy. Rotating to a fresh browser mid-run is not implemented.
+- **A dead proxy rotates, it is not retried.** All three engines recognise
+  `ERR_PROXY_CONNECTION_FAILED` and friends, stop retrying that exit, and
+  repeat the search with the next proxy from `--proxy-file` in a FRESH
+  browser (at most one attempt per proxy). The sidecar lists the dead exits
+  as `dead_proxies` (host and port only). Exit 5 only when every proxy was
+  dead. Verified on a local stand (dead → working proxy), all engines.
+- **Ordering and placements.** Rows keep the site's own order for `--sort`
+  (for `best`, descending `score` in the XHR). In the captured responses
+  (2026-09-29, 361 and 373 itineraries) there were no sponsored or promoted
+  entries: `creatives` and `buckets` were empty, and `tags` only carried
+  labels like `cheapest` / `shortest`. Not a promise that none ever appear.
+- **`diff_runs.py` compares like with like.** It refuses runs that differ in
+  route, dates, passengers, cabin or `sort`, and notes when either run was
+  capped by `--max-results` ("removed" may then be outside the slice).
 - **Round trips carry the outbound leg only.** A row's `departure_time` /
   `arrival_time` / `duration` / `stops` describe the first leg; the return
   leg is in the XHR but not in the output schema yet.

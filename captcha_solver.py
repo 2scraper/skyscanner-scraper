@@ -38,6 +38,7 @@ with no third-party widget on the page.
 """
 from __future__ import annotations
 
+import html as html_lib
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -118,11 +119,19 @@ def _strip_extension_noise(html: str) -> str:
     return _EXTENSION_SCRIPT_RE.sub("", html)
 
 
+_UNESCAPE_PREFIX = 64 * 1024
+
+
 def detect_from_html(html: str, extra_markers: Sequence[str] = ()) -> bool:
     """Broad detection: True if ANY known marker string appears. Cheap and
     deliberately over-inclusive — see module docstring on why detection and
     blocking are decided separately."""
-    haystack = _strip_extension_noise(html).lower()
+    stripped = _strip_extension_noise(html)
+    # CLAUDE.md §20: the same page reaches us entity-escaped over plain HTTP
+    # (`&#47;sttc&#47;px&#47;...`, --scraper-api) and plain from a browser
+    # DOM. Normalise a BOUNDED prefix (a challenge page is a few KB — the
+    # skyscanner one ~10 KB), not a 1 MB results page.
+    haystack = (stripped + "\n" + html_lib.unescape(stripped[:_UNESCAPE_PREFIX])).lower()
     for marker in (*GENERIC_BOT_CHALLENGE_MARKERS, *extra_markers):
         if marker.lower() in haystack:
             return True
