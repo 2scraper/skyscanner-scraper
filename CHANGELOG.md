@@ -9,6 +9,18 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Added — 2026-09-29, `batch_scraper.py`: many routes, local Chrome first, 2Captcha fallback
+- `--routes-file` CSV (`routes.example.csv`); per route: local Chrome
+  (auto-started with a persistent profile) + `--wait-for-human`, then on
+  blocked/remote error/crash the `.env` 2Captcha setup (Scraping Browser
+  with fresh-session retries). Empty results are not retried.
+  `--scraper-api` is not a fallback: it cannot see the results XHR.
+- Merged output + `<out>.batch.json` per-route summary; exit 0/6/3.
+- Live: 3/3 routes, 1690 itineraries via local Chrome, no challenge.
+  Fallback live (local port forced dead): 2 Scraping Browser sessions,
+  both PerimeterX → exit 3, reported as such.
+- Known gap: round-trip rows carry only the outbound leg's times.
+
 ### Verified live, 2026-09-29 — first real skyscanner results, via `--wait-for-human`
 - Playwright over `--cdp-endpoint http://127.0.0.1:9222` (Roman's own
   Chrome 154, fresh `--user-data-dir`, no proxy), LHR→JFK 2026-11-15:

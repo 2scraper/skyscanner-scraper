@@ -1086,6 +1086,90 @@ def _():
     assert exercised > 0, "no engine's driver is installed — this check ran against zero of the three engines"
 
 
+import batch_scraper
+
+
+def _batch_args(**kw):
+    a = batch_scraper.build_arg_parser().parse_args(["--routes-file", "x.csv"])
+    a.launch_chrome = False
+    for k, v in kw.items():
+        setattr(a, k, v)
+    return a
+
+
+@check("batch_scraper.load_routes: parses optional columns and skips comments; bad files fail with the reason")
+def _():
+    with tempfile.TemporaryDirectory() as d:
+        good = Path(d) / "r.csv"
+        good.write_text("# my routes\norigin,destination,depart_date,return_date\n"
+                        "LHR,JFK,2026-11-15,\n\nLHR,BCN,2026-12-01,2026-12-08\n", encoding="utf-8")
+        routes = batch_scraper.load_routes(str(good))
+        assert routes == [{"origin": "LHR", "destination": "JFK", "depart_date": "2026-11-15"},
+                          {"origin": "LHR", "destination": "BCN", "depart_date": "2026-12-01", "return_date": "2026-12-08"}]
+        for body, reason in [("origin,destination\nLHR,JFK\n", "missing required"),
+                             ("origin,destination,depart_date,foo\nLHR,JFK,2026-11-15,1\n", "unknown column"),
+                             ("origin,destination,depart_date\nLHR,,2026-11-15\n", "empty destination"),
+                             ("origin,destination,depart_date\n", "no routes")]:
+            bad = Path(d) / "bad.csv"; bad.write_text(body, encoding="utf-8")
+            try:
+                batch_scraper.load_routes(str(bad)); raise AssertionError(f"should have failed: {reason}")
+            except ValueError as exc:
+                assert reason in str(exc), (reason, exc)
+
+
+@check("batch_scraper fallback: blocked locally → 2Captcha; empty stays empty; no local Chrome → straight to 2Captcha; nothing configured → honest failure")
+def _():
+    import unittest.mock as mock
+    route = {"origin": "LHR", "destination": "JFK", "depart_date": "2026-11-15"}
+    sample = json.loads(json.dumps([__import__("dataclasses").asdict(_mk_product("LHRJFK-1"))]))
+
+    def engine(codes):
+        calls = []
+        def run_engine(argv):
+            code = codes[len(calls)]; calls.append(argv)
+            if code == output_writer.EXIT_OK:
+                Path(argv[argv.index("--out") + 1]).write_text(json.dumps(sample), encoding="utf-8")
+            return code
+        return run_engine, calls
+
+    with tempfile.TemporaryDirectory() as d, mock.patch.object(batch_scraper, "fallback_configured", return_value=True):
+        with mock.patch.object(batch_scraper, "local_cdp_alive", return_value=True):
+            fn, calls = engine([output_writer.EXIT_BLOCKED, output_writer.EXIT_OK])
+            o, prods = batch_scraper.scrape_route(route, args=_batch_args(), workdir=d, run_engine=fn)
+            assert (o.exit_code, o.via, o.rows, len(calls)) == (0, "2captcha", 1, 2)
+            assert "--cdp-endpoint" in calls[0] and "--wait-for-human" in calls[0]
+            assert "--cdp-endpoint" not in calls[1], "the fallback must use .env's 2Captcha setup, not local Chrome"
+
+            fn, calls = engine([output_writer.EXIT_ZERO_PRODUCTS])
+            o, _ = batch_scraper.scrape_route(route, args=_batch_args(), workdir=d, run_engine=fn)
+            assert (o.exit_code, len(calls)) == (output_writer.EXIT_ZERO_PRODUCTS, 1), "an empty search is not retried"
+
+            fn, calls = engine([output_writer.EXIT_BLOCKED])
+            o, _ = batch_scraper.scrape_route(route, args=_batch_args(fallback=False), workdir=d, run_engine=fn)
+            assert (o.exit_code, len(calls)) == (output_writer.EXIT_BLOCKED, 1)
+
+        with mock.patch.object(batch_scraper, "local_cdp_alive", return_value=False):
+            fn, calls = engine([output_writer.EXIT_OK])
+            o, _ = batch_scraper.scrape_route(route, args=_batch_args(), workdir=d, run_engine=fn)
+            assert (o.exit_code, o.via, len(calls)) == (0, "2captcha", 1)
+            assert o.attempts[0].get("skipped") == "unreachable"
+
+    with tempfile.TemporaryDirectory() as d, mock.patch.object(batch_scraper, "fallback_configured", return_value=False), \
+            mock.patch.object(batch_scraper, "local_cdp_alive", return_value=False):
+        fn, calls = engine([])
+        o, _ = batch_scraper.scrape_route(route, args=_batch_args(), workdir=d, run_engine=fn)
+        assert o.exit_code != output_writer.EXIT_OK and o.rows == 0 and calls == []
+
+
+@check("batch_scraper.batch_exit_code: all ok → 0, some ok → partial (6), none ok and blocked → 3")
+def _():
+    O = lambda c: batch_scraper.RouteOutcome(route="r", exit_code=c, via="local", rows=0)
+    E = output_writer
+    assert batch_scraper.batch_exit_code([O(E.EXIT_OK), O(E.EXIT_OK)]) == E.EXIT_OK
+    assert batch_scraper.batch_exit_code([O(E.EXIT_OK), O(E.EXIT_BLOCKED)]) == E.EXIT_PARTIAL
+    assert batch_scraper.batch_exit_code([O(E.EXIT_ZERO_PRODUCTS), O(E.EXIT_BLOCKED)]) == E.EXIT_BLOCKED
+
+
 def run() -> int:
     """All @check-decorated functions above already ran at import time
     (that's the point — see the `check()` docstring) and self-registered

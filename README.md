@@ -200,6 +200,31 @@ python3 playwright_scraper.py --origin LHR --destination JFK --depart-date 2026-
   --cdp-endpoint "$SKYSCANNER_CDP_ENDPOINT"
 ```
 
+### Many searches at once: `batch_scraper.py`
+
+```bash
+python3 batch_scraper.py --routes-file routes.example.csv --out skyscanner_batch.json
+```
+
+Per route: **1)** your local Chrome on `--local-cdp` (default
+`http://127.0.0.1:9222`, started automatically with the persistent
+profile `~/.chrome-skyscanner` if nothing listens there), with
+`--wait-for-human 180`, so a person clears PerimeterX once and later
+routes reuse that session; **2)** if that ends blocked / remote-API error /
+crashed, or local Chrome is unavailable, the same search through 2Captcha
+as configured in `.env` (Scraping Browser, fresh sessions via
+`--cdp-block-retries`). An empty search (exit 4) is not retried.
+
+Output: one merged file for all routes, plus `<out>.batch.json` with each
+route's exit code, which path produced it, and every attempt. Exit code:
+`0` all routes ok, `6` some, `3` none and at least one blocked.
+
+Verified live 2026-09-29: 3/3 routes, 1690 itineraries via local Chrome with
+no challenge (LHR-JFK 385, LHR-BCN round trip 1000+, LON-PAR 305). The
+2Captcha fallback runs and reports correctly, but against PerimeterX it came
+back blocked (exit 3), as every automated run so far. Round trips: rows
+carry the outbound leg's times only.
+
 ### When PerimeterX challenges you: `--wait-for-human`
 
 No engine solves PerimeterX's "Press & Hold" (2Captcha has no solver for it

@@ -15,3 +15,9 @@ _smoke_roundtrip.env
 # committable artifact.
 *cookies*.json
 .cookie_import/
+
+# batch_scraper.py outputs
+skyscanner_batch.*
+*.batch.json
+routes*.csv
+!routes.example.csv

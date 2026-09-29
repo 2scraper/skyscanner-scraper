@@ -1,0 +1,6 @@
+# batch_scraper.py --routes-file example. Required: origin,destination,depart_date.
+# Optional columns: return_date, adults, cabin_class, stops, sort, currency.
+origin,destination,depart_date,return_date
+LHR,JFK,2026-11-15,
+LHR,BCN,2026-12-01,2026-12-08
+LON,PAR,2026-11-20,
