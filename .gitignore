@@ -4,6 +4,7 @@
 !sample_output.json
 !sample_output.csv
 !fixtures/*.json
+!captures/*.json
 !routes.example.csv
 skyscanner_results.*
 skyscanner_batch.*

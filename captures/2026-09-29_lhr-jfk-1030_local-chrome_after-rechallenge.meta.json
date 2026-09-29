@@ -1,0 +1,19 @@
+{
+  "status": "complete",
+  "stop_reason": "complete",
+  "engine": "playwright",
+  "url": "https://www.skyscanner.com/transport/flights/LHR/JFK/261030/?adults=1&currency=USD&cabinclass=economy",
+  "pages_requested": 20,
+  "pages_completed": 8,
+  "failed_pages": [],
+  "product_count": 361,
+  "price_confirmed_pct": 1.0,
+  "started_at": 1790687483.359549,
+  "finished_at": 1790687544.6686919,
+  "results_source": "search_api",
+  "search_api_responses": 5,
+  "search_api_status": "complete",
+  "itineraries_available": 361,
+  "capped_by_max_results": false,
+  "search_incomplete": false
+}

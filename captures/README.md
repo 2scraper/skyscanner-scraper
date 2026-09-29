@@ -1,28 +1,22 @@
 # captures/
 
-Real, live captures of skyscanner.com go here — the same role
-`/home/claude/work/captures/` played while building `stockx-scraper`
-(search/category/product HTML + the embedded `__NEXT_DATA__`/JSON pulled
-out of them), used to verify `flight_parser.py`'s selectors against the
-real page instead of the best-effort guesses it ships with today.
+Measurement artefacts: the `<out>.meta.json` sidecars (and one batch
+summary) of the live runs that README's numbers come from. No row data, no
+session tokens — counts, statuses and timestamps only. `smoke_test.py`
+checks every itinerary count README states against these files, the
+fixture and the sample output, so a figure cannot drift from its source.
 
-This folder is empty right now because nothing in it has been captured
-yet — see the repo's README ("Read this before trusting a run") and
-`TESTING.md` step 2 for why, and for the exact command to produce one:
+All runs: 2026-09-29, Playwright over Roman's own local Chrome
+(`--cdp-endpoint http://127.0.0.1:9222`) after a person cleared PerimeterX's
+"Press & Hold" once (`--wait-for-human`).
 
-```bash
-python3 playwright_scraper.py --origin LHR --destination JFK \
-  --depart-date 2026-10-15 --max-results 10 \
-  --format json --out /tmp/sky_test.json --dump-html
-```
+| File | What it measured |
+|---|---|
+| `2026-09-29_lhr-jfk-1115_local-chrome_max1000.meta.json` | LHR→JFK 15.11, `--max-results 1000`: 385 itineraries (older sidecar format, before `itineraries_available` existed) |
+| `2026-09-29_lhr-jfk-1115_local-chrome_default-cap.meta.json` | same route, default `--max-results 30`: `complete`, `stop_reason: max_results`, 30 of 389 |
+| `2026-09-29_lhr-jfk-1030_local-chrome_after-rechallenge.meta.json` | LHR→JFK 30.10, re-challenged at 18:11 and cleared by hand: 361 of 361 |
+| `2026-09-29_batch_one-route.meta.json` | `batch_scraper.py`, one route: 389 |
+| `2026-09-29_batch_three-routes.summary.json` | `batch_scraper.py`, three routes (older summary format): 1690 in total |
 
-That writes `sky_test_debug.html` next to the output — drop a copy of it
-here (e.g. `captures/search_lhr_jfk.html`), and if you can, also save the
-`__NEXT_DATA__` JSON blob out of it separately (same idea as `stockx-
-scraper`'s `*_next_data.json` files) — that's the piece `flight_parser.
-_find_itinerary_lists()` actually needs to stop guessing.
-
-Once a real file is here, `flight_parser.py` gets updated to match it,
-the `# TODO: verify live` markers on whatever that file confirms get
-removed, and a trimmed/scrubbed copy plus a new `smoke_test.py` check
-gets added under `tests/fixtures/` — see `CONTRIBUTING.md`.
+The real XHR body the parser was built against is in
+`fixtures/web_unified_search_lhr_jfk_trimmed.json` (trimmed to 3 of 373).

@@ -1,0 +1,19 @@
+{
+  "status": "complete",
+  "stop_reason": "max_results",
+  "engine": "playwright",
+  "url": "https://www.skyscanner.com/transport/flights/LHR/JFK/261115/?adults=1&currency=USD&cabinclass=economy",
+  "pages_requested": 20,
+  "pages_completed": 1,
+  "failed_pages": [],
+  "product_count": 30,
+  "price_confirmed_pct": 1.0,
+  "started_at": 1790686484.03897,
+  "finished_at": 1790686488.501735,
+  "results_source": "search_api",
+  "search_api_responses": 1,
+  "search_api_status": "complete",
+  "itineraries_available": 389,
+  "capped_by_max_results": true,
+  "search_incomplete": false
+}

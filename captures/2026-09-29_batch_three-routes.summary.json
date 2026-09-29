@@ -1,0 +1,47 @@
+{
+  "exit_code": 0,
+  "routes": 3,
+  "routes_ok": 3,
+  "itineraries": 1690,
+  "per_route": [
+    {
+      "route": "LHR-JFK 2026-11-15",
+      "exit_code": 0,
+      "via": "local",
+      "rows": 385,
+      "attempts": [
+        {
+          "via": "local",
+          "exit_code": 0,
+          "rows": 385
+        }
+      ]
+    },
+    {
+      "route": "LHR-BCN 2026-12-01 / 2026-12-08",
+      "exit_code": 0,
+      "via": "local",
+      "rows": 1000,
+      "attempts": [
+        {
+          "via": "local",
+          "exit_code": 0,
+          "rows": 1000
+        }
+      ]
+    },
+    {
+      "route": "LON-PAR 2026-11-20",
+      "exit_code": 0,
+      "via": "local",
+      "rows": 305,
+      "attempts": [
+        {
+          "via": "local",
+          "exit_code": 0,
+          "rows": 305
+        }
+      ]
+    }
+  ]
+}

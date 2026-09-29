@@ -1335,6 +1335,129 @@ def _():
     assert secret[:2] not in masked and secret[-2:] not in masked and str(len(secret)) in masked, masked
 
 
+_SHARED = ("flight_parser", "captcha_solver", "output_writer", "env_config", "proxy_pool",
+           "fingerprint_client", "scraper_api_client", "playwright_scraper")
+_CALLERS = ("playwright_scraper.py", "puppeteer_scraper.py", "selenium_scraper.py", "batch_scraper.py")
+
+
+def _shared_call_mismatches(source: str, filename: str) -> tuple:
+    """CLAUDE.md §17 check #1: bind every call into a shared module against
+    the callee's REAL signature. Returns (bound_count, mismatches). A name
+    bound anywhere in the file shadows a same-named module alias (§22's one
+    rule — `proxy_pool` is also a parameter)."""
+    import ast
+    import importlib
+    import inspect
+    tree = ast.parse(source)
+    aliases, direct = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in _SHARED:
+                    aliases[a.asname or a.name] = a.name
+        elif isinstance(node, ast.ImportFrom) and node.module in _SHARED and not node.level:
+            for a in node.names:
+                direct[a.asname or a.name] = (node.module, a.name)
+    bound = {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
+    bound |= {t.id for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign, ast.For, ast.With, ast.NamedExpr))
+              for t in ast.walk(n) if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)}
+    count, bad = 0, []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        target = None
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in aliases and f.value.id not in bound:
+            target = (aliases[f.value.id], f.attr)
+        elif isinstance(f, ast.Name) and f.id in direct and f.id not in bound:
+            target = direct[f.id]
+        if not target:
+            continue
+        obj = getattr(importlib.import_module(target[0]), target[1], None)
+        if obj is None:
+            bad.append(f"{filename}:{node.lineno}: {target[0]}.{target[1]} does not exist")
+            continue
+        if not callable(obj) or isinstance(obj, type) and not hasattr(obj, "__init__"):
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
+            continue
+        try:
+            sig = inspect.signature(obj)
+        except (TypeError, ValueError):
+            continue
+        try:
+            sig.bind(*([None] * len(node.args)), **{k.arg: None for k in node.keywords})
+            count += 1
+        except TypeError as exc:
+            bad.append(f"{filename}:{node.lineno}: {target[0]}.{target[1]}(...) — {exc}")
+    return count, bad
+
+
+@check("every call into a shared module (engines + batch_scraper) binds against the callee's real signature — CLAUDE.md §17 #1, with a control")
+def _():
+    total = 0
+    for name in _CALLERS:
+        n, bad = _shared_call_mismatches((ROOT / name).read_text(encoding="utf-8"), name)
+        assert not bad, bad
+        total += n
+    assert total > 40, f"only {total} calls bound — the walk is not seeing the engines' calls"
+    control = "import flight_parser as fp\nfp.search_meta(1, 2, 3)\nfp.combine_results(a=1)\n"
+    _, bad = _shared_call_mismatches(control, "control.py")
+    assert len(bad) == 2, f"the control's two bad calls must both be reported: {bad}"
+
+
+def _dead_statements(source: str, filename: str) -> List[str]:
+    """CLAUDE.md §22: a statement after return/raise/break/continue in the
+    same block (it caught a lost `def` line six times in the family)."""
+    import ast
+    out = []
+    for node in ast.walk(ast.parse(source)):
+        for field in ("body", "orelse", "finalbody", "handlers"):
+            block = getattr(node, field, None)
+            if not isinstance(block, list):
+                continue
+            for i, stmt in enumerate(block[:-1]):
+                if isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                    out.append(f"{filename}:{block[i + 1].lineno}: unreachable after line {stmt.lineno}")
+    return out
+
+
+@check("no statement follows a return/raise/break/continue in the same block, in any shipped .py — CLAUDE.md §22, with a control")
+def _():
+    found = []
+    for path in sorted(ROOT.glob("*.py")):
+        found += _dead_statements(path.read_text(encoding="utf-8"), path.name)
+    assert not found, found
+    assert _dead_statements("def f():\n    return 1\n    x = 2\n", "control.py"), "the control must be reported"
+
+
+def _readme_itinerary_counts(text: str) -> set:
+    nums = set()
+    for m in re.finditer(r"\b(\d{2,5})(?:\s*[–-]\s*(\d{2,5}))?\s+itineraries", text):
+        nums.update(int(x) for x in m.groups() if x)
+    for m in re.finditer(r"\b(\d{2,5}) of (\d{2,5})\b", text):
+        nums.update(int(x) for x in m.groups())
+    return nums
+
+
+@check("every itinerary count README states comes from an artefact (captures/, the fixture, the sample) — CLAUDE.md §17 #4, with a control")
+def _():
+    known = set()
+    for f in (ROOT / "captures").glob("*.json"):
+        m = json.loads(f.read_text(encoding="utf-8"))
+        for k in ("product_count", "itineraries_available", "itineraries"):
+            if isinstance(m.get(k), int):
+                known.add(m[k])
+    known.add(373)  # the fixture's source response, stated in its _note
+    assert "373" in (ROOT / "fixtures" / "web_unified_search_lhr_jfk_trimmed.json").read_text(encoding="utf-8")
+    assert len(known) >= 5, f"captures/ looks empty: {known}"
+    claimed = _readme_itinerary_counts((ROOT / "README.md").read_text(encoding="utf-8"))
+    assert claimed, "found no itinerary counts in README — the pattern stopped matching"
+    stray = sorted(claimed - known)
+    assert not stray, f"README states itinerary counts with no artefact behind them: {stray} (known: {sorted(known)})"
+    assert _readme_itinerary_counts("we got 4242 itineraries") - known == {4242}, "the control must be reported"
+
+
 def run() -> int:
     """All @check-decorated functions above already ran at import time
     (that's the point — see the `check()` docstring) and self-registered

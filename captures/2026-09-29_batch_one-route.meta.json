@@ -1,0 +1,28 @@
+{
+  "status": "complete",
+  "stop_reason": "complete",
+  "engine": "batch:playwright",
+  "url": "one.csv",
+  "pages_requested": 1,
+  "pages_completed": 1,
+  "failed_pages": [],
+  "product_count": 389,
+  "price_confirmed_pct": null,
+  "started_at": 1790686127.212945,
+  "finished_at": 1790686153.755339,
+  "per_route": [
+    {
+      "route": "LHR-JFK 2026-11-15",
+      "exit_code": 0,
+      "via": "local",
+      "rows": 389,
+      "attempts": [
+        {
+          "via": "local",
+          "exit_code": 0,
+          "rows": 389
+        }
+      ]
+    }
+  ]
+}

@@ -9,6 +9,16 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Added — 2026-09-29, the template's §17/§22 checks
+- Every call from the engines and `batch_scraper.py` into a shared module is
+  bound against the callee's real signature (98 calls; a mutated keyword in
+  a real engine call is reported with its line).
+- No statement after `return`/`raise`/`break`/`continue` in any shipped file.
+- Every itinerary count README states must exist in an artefact:
+  `captures/` now holds the sidecars of the live runs those numbers came
+  from (counts and timestamps only; local paths scrubbed), plus the fixture.
+- Each check carries a control that must fail.
+
 ### Fixed — 2026-09-29, audit follow-ups
 - **Dead proxy → rotation.** The earlier fix only stopped retrying a dead
   exit and its log line claimed "a rerun takes the next one from the pool" —
