@@ -17,7 +17,14 @@ Per route (one line of --routes-file), in order:
      every live test so far — it exists so a run still gets a chance when
      no local browser/person is around, and says clearly when it failed.
 
-An EMPTY result (exit 4) is taken at face value and never retried.
+An EMPTY result (exit 4) is taken at face value and never retried, and
+does not count as a failed route.
+
+Output goes through the family's finish_run(): one merged file (deduped by
+sku, in route order) plus `<out>.meta.json`, whose `failed_pages` are the
+failed ROUTE numbers and whose `per_route` records each route's exit code,
+path and attempts. A batch where no route produced a row writes nothing
+(unless --allow-empty), exactly like a failed single run.
 `--scraper-api` is not used as a fallback: it returns HTML only, and the
 flight list arrives over the `web-unified-search` XHR it cannot see.
 
@@ -47,7 +54,7 @@ import env_config
 import playwright_scraper
 from output_writer import (
     EXIT_BAD_USAGE, EXIT_BLOCKED, EXIT_CRASH, EXIT_OK, EXIT_PARTIAL,
-    EXIT_REMOTE_API_ERROR, EXIT_ZERO_PRODUCTS, Product, write_output,
+    EXIT_REMOTE_API_ERROR, EXIT_ZERO_PRODUCTS, Product, finish_run, merge_pages,
 )
 
 log = logging.getLogger("batch_scraper")
@@ -197,15 +204,21 @@ def scrape_route(
                         rows=len(products), attempts=attempts), products
 
 
-def batch_exit_code(outcomes: List[RouteOutcome]) -> int:
-    ok = [o for o in outcomes if o.exit_code == EXIT_OK]
-    if len(ok) == len(outcomes):
-        return EXIT_OK
-    if ok:
-        return EXIT_PARTIAL
-    if any(o.exit_code == EXIT_BLOCKED for o in outcomes):
-        return EXIT_BLOCKED
-    return outcomes[0].exit_code
+def batch_outcome(outcomes: List[RouteOutcome], have_rows: bool) -> dict:
+    """finish_run() inputs for the whole batch. A route counts as FAILED
+    (by its 1-based number, like a failed page) unless it succeeded or the
+    site genuinely had nothing (exit 4). Blocked / remote-error only decide
+    the batch's status when no route produced a row; otherwise failed routes
+    make it partial (6)."""
+    failed = [i for i, o in enumerate(outcomes, start=1) if o.exit_code not in (EXIT_OK, EXIT_ZERO_PRODUCTS)]
+    failed_codes = [outcomes[i - 1].exit_code for i in failed]
+    return {
+        "pages_requested": len(outcomes),
+        "pages_completed": len(outcomes) - len(failed),
+        "failed_pages": failed,
+        "blocked": not have_rows and EXIT_BLOCKED in failed_codes,
+        "remote_api_error": not have_rows and bool(failed_codes) and EXIT_BLOCKED not in failed_codes,
+    }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -225,6 +238,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Do not retry failed routes through 2Captcha")
     p.add_argument("--cdp-block-retries", type=int, default=2, help="Fresh Scraping Browser sessions to try on the fallback")
     p.add_argument("--route-delay", type=float, default=5.0, help="Seconds between routes (be gentle)")
+    p.add_argument("--allow-empty", action="store_true", help="Write the (empty) output even when no route produced a row")
     return p
 
 
@@ -241,31 +255,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
 
+    started_at = time.time()
     outcomes: List[RouteOutcome] = []
-    products: List[Product] = []
+    per_route: List[List[Product]] = []
     with tempfile.TemporaryDirectory(prefix="skyscanner_batch_") as workdir:
         for i, route in enumerate(routes):
             if i:
                 time.sleep(args.route_delay)
             outcome, rows = scrape_route(route, args=args, workdir=workdir)
             outcomes.append(outcome)
-            products.extend(rows)
+            per_route.append(rows)
 
-    code = batch_exit_code(outcomes)
-    if products:
-        write_output(products, args.out, args.format)
-    summary = {
-        "exit_code": code,
-        "routes": len(outcomes),
-        "routes_ok": sum(o.exit_code == EXIT_OK for o in outcomes),
-        "itineraries": len(products),
-        "per_route": [asdict(o) for o in outcomes],
-    }
-    Path(args.out + ".batch.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Same sku from two routes is the same itinerary; merge in route order.
+    products = merge_pages(per_route)
+    code = finish_run(
+        products=products, out_path=args.out, fmt=args.format, engine="batch:playwright",
+        url=args.routes_file, allow_empty=args.allow_empty, started_at=started_at,
+        extra_meta={"per_route": [asdict(o) for o in outcomes]},
+        **batch_outcome(outcomes, have_rows=bool(products)),
+    )
     for o in outcomes:
         print(f"{o.route:32} exit {o.exit_code}  via {o.via:8}  {o.rows} itineraries", file=sys.stderr)
-    print(f"{summary['routes_ok']}/{len(outcomes)} routes ok, {len(products)} itineraries → "
-          f"{args.out if products else '(nothing written)'}", file=sys.stderr)
+    ok = sum(o.exit_code == EXIT_OK for o in outcomes)
+    print(f"{ok}/{len(outcomes)} routes ok, {len(products)} itineraries → "
+          f"{args.out if products or args.allow_empty else '(nothing written)'} (exit {code})", file=sys.stderr)
     return code
 
 

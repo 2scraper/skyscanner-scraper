@@ -224,6 +224,7 @@ def finish_run(
     started_at: float,
     price_confirmed_pct: Optional[float] = None,
     extra_meta: Optional[dict] = None,
+    stop_reason: Optional[str] = None,
 ) -> int:
     """Decide status/exit code, write output + sidecar (or neither), return
     the process exit code. NEVER writes a sidecar for a failed run, and
@@ -265,7 +266,7 @@ def finish_run(
 
     write_output(products, out_path, fmt)
     write_meta(
-        out_path, status=status, stop_reason=status, engine=engine, url=url,
+        out_path, status=status, stop_reason=stop_reason or status, engine=engine, url=url,
         pages_requested=pages_requested, pages_completed=pages_completed,
         failed_pages=failed_pages, product_count=len(products),
         price_confirmed_pct=price_confirmed_pct, started_at=started_at,

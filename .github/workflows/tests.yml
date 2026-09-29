@@ -24,8 +24,8 @@ jobs:
         run: python3 smoke_test.py
       - name: --help works for every CLI
         run: |
-          for engine in playwright_scraper selenium_scraper puppeteer_scraper; do
-            python3 "$engine.py" --help > /dev/null
+          for cli in playwright_scraper selenium_scraper puppeteer_scraper batch_scraper diff_runs; do
+            python3 "$cli.py" --help > /dev/null
           done
       - name: sample_output.{json,csv} match the Product schema
         run: |
@@ -92,7 +92,7 @@ jobs:
       - name: Image carries no .env, test suite, or fixtures
         run: |
           BAD=$(docker run --rm --entrypoint sh skyscanner-scraper:ci -c \
-            "ls -d .env tests 2>/dev/null; ls *_test.py 2>/dev/null" || true)
+            "ls -d .env tests fixtures 2>/dev/null; ls *_test.py 2>/dev/null" || true)
           if [ -n "$BAD" ]; then
             echo "$BAD"
             echo "::error::image contains files it must not ship: see above"

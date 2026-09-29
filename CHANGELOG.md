@@ -9,6 +9,20 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed — 2026-09-29, template audit: Docker image and batch contract
+- The Docker build would have failed: `batch_scraper.py` and `fixtures/`
+  were not COPYed (and `.dockerignore` dropped `*.json`). Both added,
+  fixtures stripped from the final layer, and a new smoke check compares
+  the COPY list with the import graph (with two controls that must fail;
+  skipped visibly inside the image, where no Dockerfile exists).
+- `batch_scraper.py` now goes through `merge_pages` + `finish_run`: dedupe,
+  `<out>.meta.json` with `per_route`, `--allow-empty`, and a batch with no
+  rows writes nothing. `<out>.batch.json` is gone. An empty route is no
+  longer a failure (ok + empty was exit 6, now 0).
+- `pyproject.toml` lists `batch_scraper`; CI's `--help` step covers
+  `batch_scraper` and `diff_runs`; the image-clean step checks `fixtures`.
+- `finish_run()` takes an optional `stop_reason`.
+
 ### Added — 2026-09-29, `batch_scraper.py`: many routes, local Chrome first, 2Captcha fallback
 - `--routes-file` CSV (`routes.example.csv`); per route: local Chrome
   (auto-started with a persistent profile) + `--wait-for-human`, then on

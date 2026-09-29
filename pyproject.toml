@@ -41,5 +41,6 @@ py-modules = [
     "playwright_scraper",
     "selenium_scraper",
     "puppeteer_scraper",
+    "batch_scraper",
     "smoke_test",
 ]

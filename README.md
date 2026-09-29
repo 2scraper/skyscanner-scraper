@@ -215,9 +215,12 @@ crashed, or local Chrome is unavailable, the same search through 2Captcha
 as configured in `.env` (Scraping Browser, fresh sessions via
 `--cdp-block-retries`). An empty search (exit 4) is not retried.
 
-Output: one merged file for all routes, plus `<out>.batch.json` with each
-route's exit code, which path produced it, and every attempt. Exit code:
-`0` all routes ok, `6` some, `3` none and at least one blocked.
+Output goes through the same `finish_run()` as a single run: one merged file
+(deduped by sku) plus `<out>.meta.json`, whose `failed_pages` are the failed
+route numbers and whose `per_route` lists each route's exit code, path and
+attempts. A route with a genuinely empty search is not a failure. Exit `0`
+all routes ok (or empty), `6` some failed, `3` none produced a row and one
+was blocked; a batch with no rows writes nothing unless `--allow-empty`.
 
 Verified live 2026-09-29: 3/3 routes, 1690 itineraries via local Chrome with
 no challenge (LHR-JFK 385, LHR-BCN round trip 1000+, LON-PAR 305). The

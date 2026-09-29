@@ -1161,13 +1161,83 @@ def _():
         assert o.exit_code != output_writer.EXIT_OK and o.rows == 0 and calls == []
 
 
-@check("batch_scraper.batch_exit_code: all ok → 0, some ok → partial (6), none ok and blocked → 3")
+@check("batch_scraper → finish_run: ok+empty → 0, ok+blocked → 6 with the failed route numbered, all blocked → 3 and NOTHING written")
 def _():
     O = lambda c: batch_scraper.RouteOutcome(route="r", exit_code=c, via="local", rows=0)
     E = output_writer
-    assert batch_scraper.batch_exit_code([O(E.EXIT_OK), O(E.EXIT_OK)]) == E.EXIT_OK
-    assert batch_scraper.batch_exit_code([O(E.EXIT_OK), O(E.EXIT_BLOCKED)]) == E.EXIT_PARTIAL
-    assert batch_scraper.batch_exit_code([O(E.EXIT_ZERO_PRODUCTS), O(E.EXIT_BLOCKED)]) == E.EXIT_BLOCKED
+    with tempfile.TemporaryDirectory() as d:
+        def finish(outcomes, rows):
+            out = str(Path(d) / f"b{len(list(Path(d).iterdir()))}.json")
+            code = output_writer.finish_run(
+                products=rows, out_path=out, fmt="json", engine="batch:playwright", url="routes.csv",
+                allow_empty=False, started_at=0.0, **batch_scraper.batch_outcome(outcomes, have_rows=bool(rows)))
+            return code, out
+        one = [_mk_product("LHRJFK-1")]
+        assert finish([O(E.EXIT_OK), O(E.EXIT_ZERO_PRODUCTS)], one)[0] == E.EXIT_OK, "an empty route is an answer, not a failure"
+        code, out = finish([O(E.EXIT_OK), O(E.EXIT_BLOCKED)], one)
+        meta = json.loads(Path(out + ".meta.json").read_text())
+        assert code == E.EXIT_PARTIAL and meta["failed_pages"] == [2] and meta["status"] == "partial"
+        code, out = finish([O(E.EXIT_BLOCKED), O(E.EXIT_BLOCKED)], [])
+        assert code == E.EXIT_BLOCKED and not Path(out).exists() and not Path(out + ".meta.json").exists()
+        assert finish([O(E.EXIT_ZERO_PRODUCTS)], [])[0] == E.EXIT_ZERO_PRODUCTS
+        assert finish([O(E.EXIT_REMOTE_API_ERROR)], [])[0] == E.EXIT_REMOTE_API_ERROR
+
+
+def _docker_image_gaps(dockerfile: str, dockerignore: str) -> List[str]:
+    """What the image would lack: local modules imported by a COPYed .py but
+    not COPYed themselves, and COPYed files that .dockerignore drops (last
+    matching pattern wins; `!` re-includes). Needs no Docker (CLAUDE.md §10)."""
+    import ast
+    import fnmatch
+    text = re.sub(r"\\\n", " ", dockerfile)
+    copied: List[str] = []
+    for line in text.splitlines():
+        parts = line.split()
+        if parts[:1] == ["COPY"] and len(parts) >= 3:
+            copied += [x for x in parts[1:-1] if not x.startswith("--")]
+    files = []
+    for c in copied:
+        path = ROOT / c
+        files += [q.relative_to(ROOT).as_posix() for q in path.rglob("*") if q.is_file()] if path.is_dir() else [c]
+    patterns = [ln.strip() for ln in dockerignore.splitlines() if ln.strip() and not ln.startswith("#")]
+
+    def ignored(rel: str) -> bool:
+        verdict = False
+        for pat in patterns:
+            neg = pat.startswith("!")
+            pat = pat[1:] if neg else pat
+            if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(Path(rel).name, pat) or rel.startswith(pat.rstrip("/") + "/"):
+                verdict = not neg
+        return verdict
+
+    gaps = [f"{f} (dropped by .dockerignore)" for f in files if ignored(f)]
+    local = {q.stem for q in ROOT.glob("*.py")}
+    shipped = {Path(f).stem for f in files if f.endswith(".py") and "/" not in f}
+    for f in [f for f in files if f.endswith(".py") and "/" not in f]:
+        for node in ast.walk(ast.parse((ROOT / f).read_text(encoding="utf-8"))):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else (
+                [node.module] if isinstance(node, ast.ImportFrom) and node.module and not node.level else [])
+            gaps += [f"{n} (imported by {f})" for n in names if n.split(".")[0] in local - shipped]
+        if "fixtures" in (ROOT / f).read_text(encoding="utf-8") and (ROOT / "fixtures").is_dir() \
+                and not any(x.startswith("fixtures/") for x in files):
+            gaps.append(f"fixtures/ (read by {f})")
+    return sorted(set(gaps))
+
+
+@check("the Dockerfile's COPY list covers every local import and fixture the build's smoke_test.py needs (and the check can fail)")
+def _():
+    if not (ROOT / "Dockerfile").exists():
+        # Running INSIDE the image (it COPYs no Dockerfile): the build itself
+        # is the check there. Keyed on the file's absence, stated loudly.
+        print("  SKIP Dockerfile COPY check: no Dockerfile here (running inside the image)")
+        return
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    gaps = _docker_image_gaps(dockerfile, dockerignore)
+    assert not gaps, f"the image would lack: {gaps}"
+    # Controls: the exact two gaps that shipped on 2026-09-29.
+    assert any("batch_scraper" in g for g in _docker_image_gaps(dockerfile.replace(" batch_scraper.py", ""), dockerignore))
+    assert any("fixtures/" in g for g in _docker_image_gaps(dockerfile, dockerignore.replace("!fixtures/*.json\n", "")))
 
 
 def run() -> int:
