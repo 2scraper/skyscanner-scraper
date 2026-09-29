@@ -85,6 +85,61 @@ around to build this — no `curl`, no bypass, nothing. That means:
   triggered — "sometimes simply isn't challenged" was always a hedge, not
   a promise, and this run is the data point that keeps it a hedge rather
   than quietly becoming an unearned claim of success.
+- **Update, 2026-09-22 — `--cookies-file` tried live for the first time,
+  and does NOT clear PerimeterX on its own, even from the exact IP that
+  solved it.** Roman solved the real "Press & Hold" challenge himself,
+  exported all 13 resulting cookies, and ran this repo with
+  `--cookies-file`. Challenged immediately over `--cdp-endpoint` (a
+  different exit IP/device than the cookies came from, so not
+  conclusive) — but ALSO challenged with `--proxy`/`--cdp-endpoint` both
+  disabled, a plain local browser on Roman's own real IP, the same
+  network the cookies were solved on. Most likely explanation: PerimeterX
+  cookies are refreshed continuously by its own JS sensor inside a real,
+  ongoing session, and/or its device fingerprint (Playwright's own
+  automation tells, e.g. `navigator.webdriver`) is enough on its own to
+  re-challenge regardless of which cookies are attached — a static
+  snapshot replayed into a different browser process isn't the same
+  "device" the cookies were issued to, even at the same IP. Not yet
+  tried: a stealth-patched browser combined with `--cookies-file`. Until
+  that's tried, the PerimeterX gap stays exactly as CONFIRMED PERMANENT
+  as before — this test confirms `--cookies-file` alone isn't the missing
+  piece, rather than leaving it merely untested. See `CHANGELOG.md` for
+  the full write-up, including a real crash this same test exposed and
+  fixed (`page.content()` racing PerimeterX's own self-reloading
+  challenge page — now degrades gracefully instead of taking the whole
+  run down).
+
+- **Update, 2026-09-22 — `--stealth` added (all three engines), not yet
+  live-tested.** The one variable the test above didn't isolate: the
+  browser's own automation fingerprint, independent of which cookies are
+  attached. `--stealth` (off by default) patches `navigator.webdriver`,
+  `window.chrome.runtime`, `navigator.plugins`/`languages`, the
+  `permissions.query('notifications')` mismatch, and WebGL vendor/renderer
+  strings, before any page loads — the same category of change as
+  `puppeteer-extra-plugin-stealth`, explicitly not a captcha solver or
+  bypass. Combine with `--cookies-file` and test live before drawing any
+  conclusion; until that live test happens, the PerimeterX gap stays
+  CONFIRMED PERMANENT exactly as stated above — this entry records what
+  was tried, not a result. See `CHANGELOG.md` for the full write-up.
+
+- **Update, 2026-09-22 — `--scraper-api` added and live-tested (all three
+  engines): a genuinely different failure shape, still not a bypass.**
+  2Captcha's Scraper API (a browserless fetch run entirely on their own
+  infrastructure — see `scraper_api_client.py`'s module docstring) never
+  showed a single PerimeterX marker in live testing, but the flight-search
+  route still never came back usable: sometimes a bare ~700-byte
+  un-hydrated app shell, sometimes a real SEO-prerendered page (in a
+  non-English locale, no way to pin it) with zero client-rendered result
+  cards — skyscanner.com's actual flight data loads via client-side JS/XHR
+  calls after the initial page, which a one-shot static fetch never
+  triggers. The homepage, by contrast, fetches completely fine. Also
+  fixed in passing: this repo's own `.env` `TWOCAPTCHA_KEY` was invalid
+  (`ERROR_KEY_DOES_NOT_EXIST`) and has been replaced with a working key —
+  worth double-checking it's the one you intend. Full write-up, including
+  both observed response shapes, in `CHANGELOG.md`. **The PerimeterX gap
+  stays CONFIRMED PERMANENT** — five mitigations tried now (`--cdp-
+  endpoint`, `--cookies-file`, `--stealth`, `--scraper-api`, and their
+  combinations), none has produced real itinerary data yet.
 
 ## Local-first
 
@@ -144,15 +199,22 @@ places they genuinely can't behave the same as Playwright.
 --proxy --proxy-file --proxy-shuffle --proxy-block-retries
 --twocaptcha-key --captcha-api --solve-captcha --min-score --cdp-endpoint
 --cdp-block-retries --cookies-file --fingerprint --fp-tags --fp-country
+--stealth --scraper-api --scraper-api-timeout --scraper-api-url
 --allow-empty --dump-html --headless/--headful`
 
-`--cdp-block-retries` (default 2) and `--cookies-file` are the two
-non-honest-messaging mitigations for the confirmed PerimeterX gap (see
-"Read this before trusting a run" above) — both are no-ops until
-`--cdp-endpoint`/a block actually happens, or a cookies file is passed,
-respectively. Present on all three engines for flag parity (CLAUDE.md
-§4), but `--cdp-block-retries` is genuinely weaker on Selenium — see
-"Engines" below.
+`--cdp-block-retries`, `--cookies-file`, `--stealth`, and `--scraper-api`
+are the four non-honest-messaging mitigations for the confirmed
+PerimeterX gap (see "Read this before trusting a run" above) — each is a
+no-op until, respectively, `--cdp-endpoint`/a block actually happens, a
+cookies file is passed, the flag is set, or the flag is set. Present on
+all three engines for flag parity (CLAUDE.md §4), but `--cdp-block-
+retries` is genuinely weaker on Selenium — see "Engines" below.
+`--scraper-api` is the odd one out structurally: every other flag above
+still launches a local/`--cdp-endpoint` browser this process drives
+itself; `--scraper-api` instead sends the fetch entirely to 2Captcha's
+own infrastructure and ignores `--proxy`/`--cdp-endpoint`/`--fingerprint`/
+`--cookies-file`/`--max-scrolls`/`--stall-rounds`/`--scroll-delay`
+(logged as a warning, not silently dropped).
 
 Identical across all three engines — a smoke_test.py check asserts the
 three parsers' flag sets never drift apart. `--fingerprint`/`--fp-tags`/

@@ -872,6 +872,38 @@ def _():
             assert outcome == fake_result, f"{mod.__name__}: _maybe_solve_captcha must pass the action through unchanged"
 
 
+@check("EVERY function that takes an 'autosolve' parameter actually calls the Captcha.setAutoSolve helper somewhere in its body — playwright/puppeteer only, selenium is exempt (cannot authenticate --cdp-endpoint at all, CLAUDE.md §6). Ported from shein-scraper 2026-09-22 after a real gap was found there (a product-page scrape function took 'autosolve' but never used it) — this repo's own engines currently have only ONE autosolve-taking function each (no separate product-detail path the way shein/flippa have), so this test is a forward guard against that same class of regression if a second entry point is ever added, not a fix for a bug found here.")
+def _():
+    import ast as _ast
+
+    HELPER_NAME = "_enable_scraping_browser_auto_solve"
+    for path in ("playwright_scraper.py", "puppeteer_scraper.py"):
+        src = (ROOT / path).read_text(encoding="utf-8")
+        tree = _ast.parse(src, filename=path)
+        checked_any = False
+        for node in _ast.walk(tree):
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            arg_names = {a.arg for a in node.args.args} | {a.arg for a in node.args.kwonlyargs}
+            if "autosolve" not in arg_names:
+                continue
+            checked_any = True
+            calls_helper = any(
+                isinstance(n, _ast.Call)
+                and (
+                    (isinstance(n.func, _ast.Name) and n.func.id == HELPER_NAME)
+                    or (isinstance(n.func, _ast.Attribute) and n.func.attr == HELPER_NAME)
+                )
+                for n in _ast.walk(node)
+            )
+            assert calls_helper, (
+                f"{path}: {node.name}() takes an 'autosolve' parameter but never calls "
+                f"{HELPER_NAME}() — captcha auto-solve would silently never be armed on "
+                f"this page/navigation path when --cdp-endpoint + --solve-captcha are set."
+            )
+        assert checked_any, f"{path}: expected at least one function with an 'autosolve' parameter (test itself may be stale)"
+
+
 @check("--cdp-block-retries / --cookies-file are defined on all three engines with matching defaults, and are actually READ (not dead flags)")
 def _():
     for mod in (playwright_scraper, selenium_scraper, puppeteer_scraper):

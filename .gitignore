@@ -7,3 +7,10 @@ __pycache__/
 _smoke_roundtrip.env
 *_debug.html
 .DS_Store
+
+# A --cookies-file is a real, live session (PerimeterX validation cookies,
+# a signed session JWT, etc.) exported from a browser that solved the
+# challenge as a human — exactly as sensitive as .env above, never a
+# committable artifact.
+*cookies*.json
+.cookie_import/

@@ -9,6 +9,177 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Verified — 2026-09-22, `Captcha.setAutoSolve` coverage audited against a real gap found in shein-scraper
+- Building a sibling family member (flippa-scraper) around Roman's explicit
+  requirement that captcha auto-solve be armed on EVERY page an engine
+  touches (not just its main entry point) surfaced a real, live gap in
+  shein-scraper's `puppeteer_scraper.py`: a second page-creation path took an
+  `autosolve` parameter but never actually called the arming helper with it.
+  Auditing this repo for the same class of gap found it does NOT have one —
+  `playwright_scraper.py` and `puppeteer_scraper.py` each have exactly ONE
+  function that creates a page/browser and takes `autosolve` (this repo has
+  no separate search-vs-product-detail split the way shein/flippa do — a
+  flight search has no per-listing "detail page" the engines scrape), and
+  both call sites are already correctly wired.
+- `smoke_test.py` gained the same AST-based regression check ported from
+  shein-scraper anyway, as a forward guard: it walks every function in
+  `playwright_scraper.py`/`puppeteer_scraper.py` and asserts that any
+  function taking an `autosolve` parameter actually calls
+  `_enable_scraping_browser_auto_solve()` somewhere in its body, so this
+  stays caught automatically if a second entry point (e.g. a per-flight
+  detail fetch) is ever added later. `selenium_scraper.py` is correctly
+  exempt — it refuses `--cdp-endpoint` outright (CLAUDE.md §6), so there is
+  no CDP session to arm this on.
+
+### Added — 2026-09-22, `--scraper-api`: fetch via 2Captcha's Scraper API, all three engines
+- Directly prompted by Roman asking us to actually use ALL FIVE of 2Captcha's
+  products for this account — captcha solving, the Scraping Browser (CDP),
+  the Fingerprint API, proxies, and the Scraper API. The last of these had
+  never been wired in at all here, despite `scraper_api_client.py` already
+  being the shared HTTP client every other product goes through — same
+  addition as shein-scraper's own `--scraper-api` (see that repo's
+  CHANGELOG for the shared implementation notes), ported here because this
+  repo is the one with the actually-unsolved problem (PerimeterX).
+- **Also fixed in passing**: this repo's own `.env`'s `TWOCAPTCHA_KEY` did
+  not work — `getBalance` returned `ERROR_KEY_DOES_NOT_EXIST` for it, so
+  every captcha-solving/fingerprint call this repo has ever made with the
+  default `.env` value was silently failing auth (caught as a WARNING per
+  this repo's own error-handling policy, not a crash, which is exactly how
+  it went unnoticed). Replaced with the same working key shein-scraper
+  uses (confirmed live via `getBalance`, same 2Captcha account) — **Roman,
+  worth double-checking `.env` has the key you actually intend for this
+  repo.**
+- **Live-tested against real skyscanner.com, all three engines, 2026-09-22
+  — genuinely different failure shape from every other mitigation tried
+  so far, but still not a working bypass.** Unlike `--cdp-endpoint` and
+  `--cookies-file` (both of which hit PerimeterX's interactive "Press &
+  Hold" challenge directly), the Scraper API NEVER showed a single
+  PerimeterX marker in any live test today — no challenge UI, no
+  `_pxCaptcha`, nothing. What came back instead, inconsistently across
+  repeated identical requests:
+  - Sometimes a bare, un-hydrated ~700-byte app shell (`<div id="root"></div>`, no content at all) — a SILENT failure mode, not a visible block.
+  - Sometimes a real, full SEO-prerendered page (225-229KB, correct route,
+    real `<title>`/meta description for the actual search) but in a
+    non-English locale (nl-NL, fi-FI seen) determined by whatever exit IP
+    2Captcha's own infrastructure happened to use that request — no
+    documented way to pin it — and with ZERO client-rendered
+    `[data-testid="result-card"]` elements: skyscanner.com's real flight
+    results are fetched and injected by client-side JS/XHR calls AFTER
+    the initial page loads, and a single static/one-shot fetch (even with
+    `waitFor: {"state": "load"}`, the strongest wait condition this
+    endpoint accepts) never waits for or triggers those calls.
+  - The skyscanner.com HOMEPAGE, by contrast, rendered completely fine
+    (265-267KB, real content) — so whatever produces the two failure
+    shapes above is specific to the flight-search route, not a general
+    inability to fetch skyscanner.com at all.
+  Both failure shapes are handled without crashing: the bare-shell case is
+  caught by an explicit shell-length heuristic (no `BOT_CHALLENGE_MARKERS`
+  text exists to detect it any other way) and reported `EXIT_BLOCKED`
+  (retried via `--cdp-block-retries`, reused as this mode's retry knob);
+  the real-page-zero-cards case reports `EXIT_ZERO_PRODUCTS`, not a false
+  `EXIT_OK`.
+- **Conclusion**: this is genuinely new information (a WAF/CDN-level
+  response difference from what a real browser sees), not just another
+  way of hitting the same wall — but it does not change this repo's
+  overall verdict. PerimeterX (or something upstream of it, on the
+  flight-search route specifically) still prevents this repo from getting
+  real itinerary data through any path tried so far: local browser,
+  `--cdp-endpoint`, `--cookies-file`, `--stealth`, and now `--scraper-api`.
+  See README's "Read this before trusting a run" for the standing,
+  now five-mitigations-deep, honest status.
+- Not implemented/tried: `scrape_url()`'s `cdp_url` parameter (2Captcha's
+  `cdpurl` field) would let this mode's fetch run through a caller-
+  controlled CDP session — e.g. this repo's own `--cdp-endpoint` — instead
+  of 2Captcha's own default pool. Since `--cdp-endpoint` alone already hits
+  the interactive challenge directly, this combination seems unlikely to
+  help, but it hasn't actually been tried.
+
+### Added — 2026-09-22, `--stealth`: patch common automation tells, across all three engines
+- Direct follow-up to the entry above: since a static `--cookies-file`
+  snapshot alone didn't clear PerimeterX even from the solving IP, the next
+  variable to isolate is the browser's own automation fingerprint. `--stealth`
+  (off by default) patches, before any page loads: `navigator.webdriver`
+  (hidden instead of `true`), `window.chrome.runtime` (populated instead of
+  absent), `navigator.plugins`/`navigator.languages` (fake PDF-viewer
+  entries instead of empty), `permissions.query('notifications')` (matched
+  to `Notification.permission` instead of the automation-only mismatch), and
+  WebGL vendor/renderer (`Intel Inc.` / `Intel Iris OpenGL Engine` instead of
+  the CDP-default SwiftShader/Google Inc. strings that are themselves a tell)
+  — plus a `toString()` patch on the patched `permissions.query` so the patch
+  itself doesn't become the more obvious tell. Same script content in all
+  three engines (`playwright_scraper.py` via `context.add_init_script()`,
+  `selenium_scraper.py` via the `Page.addScriptToEvaluateOnNewDocument` CDP
+  command, `puppeteer_scraper.py` via `page.evaluateOnNewDocument()`) — each
+  runs on every document in the context/page before that document's own
+  scripts execute, and each failure path is caught and logged, never fatal
+  (CLAUDE.md §6). Explicitly **not** a captcha solver or bypass: it changes
+  what this browser reveals about itself, nothing about PerimeterX's own
+  challenge logic. Unverified as of this entry — combine with
+  `--cookies-file` and test live before drawing any conclusion about whether
+  it actually helps; `smoke_test.py` confirms only that all three engines
+  expose the identical flag (CLAUDE.md §4 parity), not that it works.
+
+### Fixed — 2026-09-22, a real crash: page.content() racing a client-side navigation/reload
+- Directly hit live by Roman's own `--cookies-file` test over `--cdp-endpoint`:
+  the round loop's `html = await page.content()` is not itself a captcha
+  interaction, but PerimeterX's own challenge page apparently keeps
+  reloading/redirecting itself client-side, and calling `page.content()`
+  at the wrong instant raised `Page.content: Unable to retrieve content
+  because the page is navigating and changing the content.` — unhandled,
+  so it crashed the ENTIRE run (`EXIT_CRASH`, not `EXIT_BLOCKED`),
+  discarding whatever had already been collected. This violated CLAUDE.md
+  §6 (a bad round degrades, it never takes the whole run down). Both
+  `page.content()` call sites in `scrape_search()` (the round loop, and
+  the final `--dump-html` capture) now catch this, wait briefly, retry
+  once, and degrade this round/the dump gracefully on a second failure
+  rather than raising. Verified live immediately after: the same command
+  that crashed now completes cleanly as `EXIT_BLOCKED` (3) instead.
+
+### Verified live, 2026-09-22 — `--cookies-file` alone does NOT clear PerimeterX, even from the exact IP that solved it
+- Directly answering the open question from the entry below (`--cookies-
+  file` was implemented 2026-09-20 but never actually run live until
+  today): Roman solved the PerimeterX "Press & Hold" challenge himself in
+  his own real Chrome, exported all 13 resulting cookies (including the
+  load-bearing `_px3`, `pxcts`, `_pxvid`, and a signed `__Secure-
+  session_id` JWT) via the Cookie-Editor extension, and ran this repo
+  with `--cookies-file` pointed at the converted, `_load_cookies_file()`-
+  validated result.
+  - **First attempt, over `--cdp-endpoint` (2Captcha Scraping Browser)**:
+    challenged immediately, on every one of 3 attempts (initial +
+    2 `--cdp-block-retries`). Confounded: the cookies came from Roman's
+    own machine/IP, but were presented through a completely different
+    exit IP and device (the Scraping Browser's own managed session) —
+    IP/device mismatch alone could fully explain this result without
+    saying anything about whether the cookies themselves are any good.
+  - **Second attempt, `SKYSCANNER_PROXY`/`SKYSCANNER_CDP_ENDPOINT` both
+    temporarily disabled** (a plain local Playwright-launched Chromium,
+    direct connection, Roman's own real IP — the same network the
+    cookies were solved on): challenged again, just as fast (the crash
+    above happened on THIS run — caught by the fix immediately above).
+  - **Conclusion**: even controlling for IP, a static cookie snapshot
+    handed to a bare, un-stealth-patched Playwright browser does not
+    clear PerimeterX. The most likely explanation, not yet independently
+    confirmed: PerimeterX's `_px3`/`pxcts` cookies are refreshed
+    continuously by its own JS sensor script running inside a real,
+    ongoing browsing session, and/or PerimeterX's device fingerprint
+    (Playwright's default `navigator.webdriver = true` among other
+    automation tells) is itself sufficient to re-challenge regardless of
+  which cookies are attached — a static snapshot replayed into a
+  DIFFERENT browser process, even same-IP, is not the same "device" the
+  cookies were issued to. This matches etsy-scraper's own README noting
+  its DataDome cookie is "bound to the address that solved it" — the
+  binding is plausibly broader than IP alone.
+  - **Not yet tried**: a stealth-patched browser (e.g. removing
+    `navigator.webdriver`, canvas/WebGL noise matching a real profile)
+    combined with `--cookies-file`, which is a materially bigger
+    engineering investment than this repo's existing three honest,
+    non-bypass mitigations and has no guarantee of working against a
+    system this well-defended. Until/unless that's tried, the PerimeterX
+    gap documented below stands exactly as CONFIRMED PERMANENT as it did
+    before this test — `--cookies-file` is now confirmed NOT to be the
+    missing piece on its own, not merely still-untested.
+
+### Verified live, 2026-09-21 — `--cdp-block-retries` exercised end-to-end
 ### Verified live, 2026-09-21 — `--cdp-block-retries` exercised end-to-end
 - `python3 playwright_scraper.py --origin LHR --destination JFK
   --depart-date 2026-10-15 --max-results 10 --format json --out

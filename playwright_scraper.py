@@ -57,7 +57,7 @@ from captcha_solver import detect_from_html, solve_when_blocked
 from fingerprint_client import fetch_fingerprint, refuse_if_cdp, user_agent_from
 from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, merge_pages, sku_key as _sku_key
 from proxy_pool import Proxy, ProxyPool, ProxyParseError, is_proxy_dead_error, load_proxies, redact_credentials
-from scraper_api_client import TwoCaptchaClient
+from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptchaError
 
 ENGINE_NAME = "playwright"
 
@@ -155,8 +155,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session (a different exit identity from the pool) and retry this many times before giving up. Reputation/behavior-based defenses sometimes simply don't challenge a fresh session at all. Has no effect without --cdp-endpoint.")
     p.add_argument("--cookies-file", default=None, help="Path to a JSON array of cookies (Playwright's context.cookies() shape) from a session a HUMAN solved manually — loaded into the browser context before navigating. This is a way to reuse a person's own solve, never a way to solve a challenge automatically.")
     p.add_argument("--fingerprint", action="store_true", help="Fetch and apply a 2Captcha Fingerprint API profile (ignored with --cdp-endpoint — see fingerprint_client.refuse_if_cdp)")
+    p.add_argument(
+        "--stealth", action="store_true",
+        help="Patch common automation tells (navigator.webdriver, window.chrome, WebGL vendor/"
+             "renderer, plugin list) before any page loads. Experimental, added 2026-09-22 after "
+             "a real --cookies-file test still got challenged by PerimeterX from the exact IP that "
+             "solved it — see CHANGELOG.md for what this has and hasn't been confirmed to fix. Not "
+             "a captcha solver or bypass: it changes what THIS browser reveals about itself, "
+             "nothing about the challenge.",
+    )
     p.add_argument("--fp-tags", default=None, help="Fingerprint API filter, e.g. 'Windows,Chrome'")
     p.add_argument("--fp-country", default=None, help="Fingerprint API filter, e.g. 'us'")
+    p.add_argument(
+        "--scraper-api", action="store_true",
+        help="Fetch via 2Captcha's Scraper API (scraper.2captcha.com) instead of launching any local "
+             "or --cdp-endpoint browser — a single browserless HTTP call, run entirely on 2Captcha's "
+             "own infrastructure. Requires --twocaptcha-key/TWOCAPTCHA_KEY. A GENUINELY DIFFERENT "
+             "product from --cdp-endpoint's Scraping Browser API — see scraper_api_client.py's module "
+             "docstring. Live-tested against real skyscanner.com, 2026-09-22: the homepage renders "
+             "fine (real, full HTML), but the actual flight-search results page — the one behind "
+             "PerimeterX — comes back as a bare, un-hydrated app shell every time (708 bytes, no "
+             "results, no visible challenge UI either): a SILENT block, different in kind from the "
+             "interactive Press & Hold challenge a real browser hits, but a block nonetheless. NOT a "
+             "confirmed bypass — see CHANGELOG.md for the full write-up. --max-scrolls/--stall-rounds/"
+             "--scroll-delay/--proxy/--cdp-endpoint/--fingerprint/--cookies-file are all IGNORED in "
+             "this mode (a single static fetch has no scroll loop, no live page/DOM to inject cookies "
+             "into, and brings its own exit IP/device) — set together, they log a warning rather than "
+             "silently doing nothing.",
+    )
+    p.add_argument("--scraper-api-timeout", type=_positive_int, default=60, help="Seconds 2Captcha itself waits for the target page to finish loading (1-120, their limit)")
+    p.add_argument("--scraper-api-url", default=None, help="Override the Scraper API base URL (testing only)")
     p.add_argument("--allow-empty", action="store_true", help="Write output even if zero itineraries were found")
     p.add_argument("--dump-html", action="store_true", help="Save the final accumulated page HTML next to --out, on success too")
     p.add_argument("--headless", dest="headless", action="store_true", default=True)
@@ -185,8 +213,82 @@ def _dump_path(out_path: str) -> str:
     return f"{stem}_debug.html"
 
 
+# --stealth (added 2026-09-22, directly prompted by the --cookies-file
+# result below: even from the exact IP that solved a real PerimeterX
+# challenge, a bare Playwright-launched Chromium got re-challenged just as
+# fast — automation fingerprint tells (navigator.webdriver and friends),
+# not IP or cookie possession, are the more likely explanation). This is a
+# battery of the standard, publicly-documented evasions used across the
+# scraping ecosystem (the same category "puppeteer-extra-plugin-stealth"
+# ships) — patch what a headless/automation-controlled Chromium reveals
+# about itself, not anything about solving or bypassing PerimeterX's own
+# challenge. UNCONFIRMED whether this actually clears PerimeterX — see
+# CHANGELOG.md for what's been measured so far, not assumed.
+_STEALTH_INIT_SCRIPT = """
+(() => {
+  // navigator.webdriver: the single most commonly checked automation tell.
+  Object.defineProperty(Navigator.prototype, 'webdriver', { get: () => undefined, configurable: true });
+
+  // A real Chrome has a populated window.chrome.runtime; a bare Playwright/
+  // CDP session does not.
+  if (!window.chrome) { window.chrome = {}; }
+  if (!window.chrome.runtime) {
+    window.chrome.runtime = {
+      connect: () => {}, sendMessage: () => {}, id: undefined,
+    };
+  }
+
+  // navigator.plugins/mimeTypes: empty in a bare automated context; a real
+  // Chrome always reports the built-in PDF viewer entries at minimum.
+  const fakePlugins = [
+    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+  ];
+  Object.defineProperty(Navigator.prototype, 'plugins', { get: () => fakePlugins, configurable: true });
+  Object.defineProperty(Navigator.prototype, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+
+  // permissions.query('notifications') returns 'denied' under a bare
+  // automated context inconsistently with Notification.permission — a
+  // known, specifically-checked mismatch.
+  const origQuery = window.navigator.permissions && window.navigator.permissions.query;
+  if (origQuery) {
+    window.navigator.permissions.query = (params) => (
+      params && params.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission, onchange: null })
+        : origQuery(params)
+    );
+  }
+
+  // WebGL vendor/renderer: SwiftShader/Google Inc. (the CDP-default
+  // software renderer) is itself a strong automation signal — report a
+  // plausible real-hardware string instead.
+  const getParameterPatch = (proto) => {
+    const orig = proto.getParameter;
+    proto.getParameter = function (parameter) {
+      if (parameter === 37445) return 'Intel Inc.';
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+      return orig.apply(this, arguments);
+    };
+  };
+  try { getParameterPatch(WebGLRenderingContext.prototype); } catch (e) {}
+  try { getParameterPatch(WebGL2RenderingContext.prototype); } catch (e) {}
+
+  // A patched native function's own toString() must still look native —
+  // otherwise the patch above becomes its own, more obvious tell.
+  const nativeToStringPatch = (fn, name) => {
+    try {
+      fn.toString = () => `function ${name}() { [native code] }`;
+    } catch (e) {}
+  };
+  nativeToStringPatch(window.navigator.permissions.query, 'query');
+})();
+""".strip()
+
+
 async def _new_context(
     browser: Browser, proxy: Optional[Proxy], user_agent: Optional[str], cookies: Optional[list] = None,
+    stealth: bool = False,
 ) -> BrowserContext:
     kwargs = {}
     if proxy is not None:
@@ -194,6 +296,11 @@ async def _new_context(
     if user_agent:
         kwargs["user_agent"] = user_agent
     context = await browser.new_context(**kwargs)
+    if stealth:
+        # Before any page/navigation exists in this context, so it runs on
+        # every document (main frame and any iframe) before that page's own
+        # scripts get a chance to observe the unpatched originals.
+        await context.add_init_script(_STEALTH_INIT_SCRIPT)
     if cookies:
         # A manually-solved session's cookies (see --cookies-file / captcha_
         # solver.py's module docstring) — added before any navigation so
@@ -284,7 +391,7 @@ async def scrape_search(
 
     proxy = proxy_pool.next() if proxy_pool else None
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
-    context = await _new_context(browser, proxy, user_agent, cookies=cookies)
+    context = await _new_context(browser, proxy, user_agent, cookies=cookies, stealth=args.stealth)
     page = await context.new_page()
     if autosolve:
         await _enable_scraping_browser_auto_solve(context, page)
@@ -324,7 +431,26 @@ async def scrape_search(
 
     for round_num in range(args.max_scrolls + 1):
         rounds = round_num
-        html = await page.content()
+        try:
+            html = await page.content()
+        except Exception as exc:  # noqa: BLE001 — page.content() can race a
+            # client-side navigation/reload. Confirmed live, 2026-09-22
+            # (Roman's own --cookies-file run over --cdp-endpoint): this
+            # exact call crashed the WHOLE process with "Unable to retrieve
+            # content because the page is navigating and changing the
+            # content" — almost certainly PerimeterX's own challenge page
+            # reloading itself, not a bug in what this scraper asked the
+            # page to do. One short wait-and-retry, then degrade this round
+            # instead of taking the whole run down with it (CLAUDE.md §6 —
+            # a bad round must never discard already-collected siblings).
+            log.warning("page.content() failed mid-navigation (%s) — waiting briefly and retrying once.", exc)
+            await asyncio.sleep(1.0)
+            try:
+                html = await page.content()
+            except Exception as exc2:  # noqa: BLE001
+                log.warning("page.content() failed again (%s) — ending this round's collection here, not crashing the run.", exc2)
+                scroll_error = True
+                break
         if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
             blocked = True
         captcha_result = await _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score)
@@ -374,10 +500,89 @@ async def scrape_search(
         await asyncio.sleep(args.scroll_delay)
 
     if args.dump_html:
-        Path(_dump_path(args.out)).write_text(await page.content(), encoding="utf-8")
+        try:
+            final_html = await page.content()
+        except Exception as exc:  # noqa: BLE001 — same navigation race as
+            # above; a failed debug dump must never crash an otherwise-
+            # complete/blocked run.
+            log.warning("--dump-html: page.content() failed (%s) — skipping the dump, not crashing.", exc)
+            final_html = None
+        if final_html is not None:
+            Path(_dump_path(args.out)).write_text(final_html, encoding="utf-8")
 
     await context.close()
     return merged, blocked, remote_api_error, rounds, scroll_error
+
+
+def _scrape_via_scraper_api(
+    *, args: argparse.Namespace, start_url: str, client: TwoCaptchaClient,
+) -> tuple:
+    """--scraper-api's own fetch path: one browserless HTTP call to
+    2Captcha's Scraper API, no local/CDP browser, no scroll loop (a static
+    HTML snapshot can't scroll itself), no cookie injection (no live
+    page/DOM to add --cookies-file's cookies to before navigation — see
+    --scraper-api's help text). Returns the same 5-tuple shape as
+    scrape_search() so run() below can treat both the same way; `rounds`
+    is always 0 here since there is exactly one fetch, never a round loop.
+
+    Live-tested 2026-09-22: real HTML comes back for skyscanner.com's
+    homepage, but the actual flight-search results URL (PerimeterX-
+    protected) comes back as a bare ~700-byte app shell every time — no
+    BOT_CHALLENGE_MARKERS text (PerimeterX's "Press & Hold" UI is itself
+    rendered by client-side JS that never got a chance to run/decide to
+    show it), no results either. That shell has NO recognisable bot-
+    challenge marker, so `detect_from_html()` alone cannot tell it apart
+    from "genuinely zero itineraries" — see the explicit shell-length
+    heuristic below, added specifically because of this live finding."""
+    try:
+        result = client.scrape_url(start_url, timeout=args.scraper_api_timeout)
+    except TwoCaptchaAuthError as exc:
+        log.error("Scraper API: %s", exc)
+        return [], False, True, 0, False
+    except TwoCaptchaError as exc:
+        log.error("Scraper API request failed — treating as remote_api_error, not a crash: %s", exc)
+        return [], False, True, 0, False
+
+    html = result.body
+    blocked = False
+    if result.target_status is not None and result.target_status >= 400:
+        log.warning("Scraper API: target page returned HTTP %d — treating as blocked.", result.target_status)
+        blocked = True
+    if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
+        blocked = True
+    # See the docstring above: a real, live 2026-09-22 finding — PerimeterX
+    # on skyscanner.com's search URL serves a silent, un-hydrated ~700-byte
+    # app shell instead of either real content or a visible challenge.
+    # `<div id="root"></div>` with nothing rendered into it and no
+    # BOT_CHALLENGE_MARKERS text is NOT "genuinely zero itineraries" — a
+    # real empty search still returns the full ~250KB+ hydrated app.
+    if not blocked and len(html) < 5000 and "root" in html:
+        log.warning(
+            "Scraper API returned a %d-byte un-hydrated app shell (no results, no visible "
+            "challenge marker either) — treating as a silent block, not zero itineraries. See "
+            "--scraper-api's help text.",
+            len(html),
+        )
+        blocked = True
+
+    if args.dump_html:
+        Path(_dump_path(args.out)).write_text(html, encoding="utf-8")
+
+    parsed = fp.safe_parse_search_results(
+        html, origin=args.origin, destination=args.destination, depart_date=args.depart_date,
+        return_date=args.return_date, adults=args.adults, currency=args.currency,
+        cabin_class=args.cabin_class, stops=args.stops, sort=args.sort,
+        max_results=args.max_results,
+    )
+    if parsed.source_used == "none" and not blocked:
+        log.warning(
+            "No itineraries recognised in the Scraper API response — either this search genuinely "
+            "has no results, or the fetch landed on a page/locale this repo's parser doesn't "
+            "recognise (a clean skyscanner.com homepage fetch landed on a non-US locale in live "
+            "testing — the same caveat shein-scraper's own --scraper-api documents). Re-run with "
+            "--dump-html to inspect what actually came back."
+        )
+    return parsed.products, blocked, False, 0, False
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -394,6 +599,51 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Error: unsupported --format {args.format!r}", file=sys.stderr)
         return EXIT_BAD_USAGE
     args.out = args.out or _default_out(args.format)
+
+    if args.scraper_api:
+        # A whole separate, browserless code path — no Playwright import is
+        # needed at all here (see CLAUDE.md §6), so it's skipped even though
+        # this run() already required it above (mirrors shein-scraper's own
+        # --scraper-api, which checks async_playwright further down instead
+        # — here the check already happened before this branch exists, so
+        # this comment just documents that this mode never touches it).
+        if not args.twocaptcha_key:
+            print("Error: --scraper-api requires --twocaptcha-key/TWOCAPTCHA_KEY", file=sys.stderr)
+            return EXIT_BAD_USAGE
+        if args.proxy or args.proxy_file or args.cdp_endpoint or args.fingerprint or args.cookies_file:
+            log.warning(
+                "--scraper-api ignores --proxy/--proxy-file/--cdp-endpoint/--fingerprint/"
+                "--cookies-file — this mode brings its own exit IP/device via 2Captcha's own "
+                "infrastructure and has no live page/DOM to inject cookies into, see "
+                "--scraper-api's help text."
+            )
+        client = TwoCaptchaClient(args.twocaptcha_key, api_base=args.captcha_api, scraper_api_base=args.scraper_api_url)
+        blocked = remote_api_error = False
+        merged: List[Product] = []
+        # Reuses --cdp-block-retries as the retry knob for this mode too —
+        # this repo has no separate plain --block-retries (only the CDP-
+        # gated one), and "reconnect/retry this many times before giving
+        # up on a blocked outcome" is exactly the same idea here.
+        for block_attempt in range(args.cdp_block_retries + 1):
+            merged, blocked, remote_api_error, rounds, scroll_error = _scrape_via_scraper_api(
+                args=args, start_url=start_url, client=client,
+            )
+            if remote_api_error or not (blocked and not merged):
+                break
+            if block_attempt < args.cdp_block_retries:
+                log.warning(
+                    "Blocked with zero itineraries (Scraper API attempt %d/%d) — retrying the "
+                    "same fetch before giving up.",
+                    block_attempt + 1, args.cdp_block_retries + 1,
+                )
+                await asyncio.sleep(args.retry_delay)
+        price_confirmed_pct = (sum(1 for p in merged if p.price is not None) / len(merged)) if merged else None
+        return finish_run(
+            products=merged, out_path=args.out, fmt=args.format, engine=ENGINE_NAME, url=start_url,
+            pages_requested=1, pages_completed=0 if remote_api_error else 1, failed_pages=None,
+            blocked=blocked, remote_api_error=remote_api_error, allow_empty=args.allow_empty,
+            started_at=started_at, price_confirmed_pct=price_confirmed_pct,
+        )
 
     try:
         cookies = _load_cookies_file(args.cookies_file)
