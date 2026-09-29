@@ -292,6 +292,10 @@ _STEALTH_INIT_SCRIPT = """
 """.strip()
 
 
+def _is_local_endpoint(cdp_endpoint: str) -> bool:
+    return urlparse(cdp_endpoint).hostname in ("localhost", "127.0.0.1", "::1")
+
+
 async def _new_context(
     browser: Browser, proxy: Optional[Proxy], user_agent: Optional[str], cookies: Optional[list] = None,
     stealth: bool = False,
@@ -397,7 +401,17 @@ async def scrape_search(
 
     proxy = proxy_pool.next() if proxy_pool else None
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
-    context = await _new_context(browser, proxy, user_agent, cookies=cookies, stealth=args.stealth)
+    # Your own local Chrome (--cdp-endpoint on localhost): work in its real,
+    # persistent profile so a challenge a person cleared stays cleared across
+    # runs. A fresh context would be an empty incognito-like one every time.
+    reuse_profile = bool(args.cdp_endpoint and browser.contexts and _is_local_endpoint(args.cdp_endpoint))
+    if reuse_profile:
+        context = browser.contexts[0]
+        log.info("Using your local Chrome's own profile (cookies persist across runs).")
+        if cookies:
+            await context.add_cookies(cookies)
+    else:
+        context = await _new_context(browser, proxy, user_agent, cookies=cookies, stealth=args.stealth)
     page = await context.new_page()
     capture = fp.SearchApiCapture()
 
@@ -432,7 +446,7 @@ async def scrape_search(
                 await asyncio.sleep(args.retry_delay)
 
     if last_error is not None:
-        await context.close()
+        await (page.close() if reuse_profile else context.close())
         log.error("Search page permanently failed to load: %s", last_error)
         return [], False, True, 0, False
 
@@ -460,6 +474,16 @@ async def scrape_search(
                 if html_now and not detect_from_html(html_now, fp.BOT_CHALLENGE_MARKERS):
                     log.info("Challenge cleared by hand — continuing in this session.")
                     await asyncio.sleep(READINESS_WAIT_MS / 1000)
+                    # Seen live 2026-09-29: after a geo redirect the challenge
+                    # returned to the HOMEPAGE, not the search, so no more
+                    # results would ever arrive there.
+                    if not fp.is_search_url(page.url):
+                        log.info("The challenge returned to %s, not the search: re-opening the search.", page.url)
+                        try:
+                            await page.goto(start_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+                            await asyncio.sleep(READINESS_WAIT_MS / 1000)
+                        except Exception as exc:  # noqa: BLE001 — the round loop still reads whatever loaded
+                            log.warning("Re-opening the search after the challenge failed: %s", exc)
                     blocked = False
                     break
             else:
@@ -567,7 +591,7 @@ async def scrape_search(
         if final_html is not None:
             Path(_dump_path(args.out)).write_text(final_html, encoding="utf-8")
 
-    await context.close()
+    await (page.close() if reuse_profile else context.close())
     return merged, blocked, remote_api_error, rounds, scroll_error
 
 
@@ -661,7 +685,7 @@ async def run(args: argparse.Namespace) -> int:
         return EXIT_BAD_USAGE
     if args.wait_for_human:
         if args.cdp_endpoint:
-            if urlparse(args.cdp_endpoint).hostname not in ("localhost", "127.0.0.1", "::1"):
+            if not _is_local_endpoint(args.cdp_endpoint):
                 log.warning("--wait-for-human with a remote --cdp-endpoint: nobody can see that browser's "
                             "window, so a challenge there cannot be completed by hand.")
         elif args.headless:

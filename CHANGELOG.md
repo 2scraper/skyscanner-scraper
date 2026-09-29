@@ -9,6 +9,25 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Verified live, 2026-09-29 — first real skyscanner results, via `--wait-for-human`
+- Playwright over `--cdp-endpoint http://127.0.0.1:9222` (Roman's own
+  Chrome 154, fresh `--user-data-dir`, no proxy), LHR→JFK 2026-11-15:
+  - run 1: PerimeterX "Press & Hold" appeared; Roman held it (~10s); exit 0.
+  - run 2, same profile a few minutes later: **no challenge**; the
+    `web-unified-search` capture returned `complete` → exit 0.
+  - run 3 with `--max-results 1000`: **385/385 itineraries in 9.9s**, all
+    with price, airline, times and deeplink, 385 unique skus.
+- Two fixes that run 1 exposed:
+  - Over a LOCAL `--cdp-endpoint`, Playwright now works in Chrome's own
+    persistent profile (`browser.contexts[0]`) and closes only its tab.
+    Before, every run got a fresh empty context, so a challenge a person
+    cleared never stayed cleared (that is what made run 2 challenge-free).
+  - After a geo redirect (`.com` → `ru.skyscanner.com` → `.net`) the
+    challenge returned to the HOMEPAGE, not the search, so no more results
+    arrived. All three engines now re-open the search if the page is not
+    on a search URL after the challenge clears (verified on a local stand
+    replaying that redirect, all three engines).
+
 ### Added — 2026-09-29, `--wait-for-human SECONDS`, all three engines
 - On a bot challenge, print instructions and wait for a PERSON to complete
   it in the browser window (nothing is solved automatically), then carry on

@@ -22,6 +22,11 @@ able to look at the real site.** `WebFetch` on skyscanner.com's search
 pages returns `ROBOTS_DISALLOWED`, and that restriction was not worked
 around to build this — no `curl`, no bypass, nothing. That means:
 
+- **Live-verified 2026-09-29:** with `--wait-for-human` over your own
+  local Chrome (`--cdp-endpoint http://127.0.0.1:9222`), a person holds
+  the PerimeterX button once; later runs in that same Chrome profile got
+  no challenge and returned the full result set (385/385 itineraries for
+  LHR→JFK in ~10s). Fully automated runs still stop at PerimeterX.
 - **Update 2026-09-29:** the flight list actually arrives over the
   `web-unified-search` XHR, not in the HTML. A real response body
   (captured by hand in Chrome, LHR→JFK, 373 itineraries) is now the

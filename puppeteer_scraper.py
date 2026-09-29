@@ -465,6 +465,16 @@ async def scrape_search(
                 if html_now and not detect_from_html(html_now, fp.BOT_CHALLENGE_MARKERS):
                     log.info("Challenge cleared by hand — continuing in this session.")
                     await asyncio.sleep(READINESS_WAIT_S)
+                    # Seen live 2026-09-29: after a geo redirect the challenge
+                    # returned to the HOMEPAGE, not the search, so no more
+                    # results would ever arrive there.
+                    if not fp.is_search_url(page.url):
+                        log.info("The challenge returned to %s, not the search: re-opening the search.", page.url)
+                        try:
+                            await page.goto(start_url, {"waitUntil": "domcontentloaded", "timeout": NAV_TIMEOUT_MS})
+                            await asyncio.sleep(READINESS_WAIT_S)
+                        except Exception as exc:  # noqa: BLE001 — the round loop still reads whatever loaded
+                            log.warning("Re-opening the search after the challenge failed: %s", exc)
                     blocked = False
                     break
             else:
