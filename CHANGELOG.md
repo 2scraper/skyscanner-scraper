@@ -9,6 +9,14 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Added — 2026-09-29, `--wait-for-human SECONDS`, all three engines
+- On a bot challenge, print instructions and wait for a PERSON to complete
+  it in the browser window (nothing is solved automatically), then carry on
+  in that session. Forces `--headful` unless `--cdp-endpoint` points at a
+  local Chrome; warns on a remote endpoint nobody can see. Timeout → exit 3.
+- Verified on a local stand for all three engines (challenge page that
+  clears after 5s → 3 rows, exit 0; one that never clears → exit 3).
+
 ### Added — 2026-09-29, all three engines capture the `web-unified-search` XHR
 - The flight list is never in the initial HTML; the page fetches it from
   `web-unified-search` and re-polls while `context.status` is

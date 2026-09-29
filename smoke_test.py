@@ -1062,6 +1062,30 @@ def _():
     assert exercised > 0, "no engine's driver is installed — this check ran against zero of the three engines"
 
 
+@check("a negative --wait-for-human is EXIT_BAD_USAGE (2) in every installed engine, before any browser starts")
+def _():
+    _IMPORT_ERROR_ATTR = {
+        "playwright_scraper": "_PLAYWRIGHT_IMPORT_ERROR",
+        "selenium_scraper": "_SELENIUM_IMPORT_ERROR",
+        "puppeteer_scraper": "_PYPPETEER_IMPORT_ERROR",
+    }
+    exercised = 0
+    with tempfile.TemporaryDirectory() as d:
+        for mod in (playwright_scraper, selenium_scraper, puppeteer_scraper):
+            if getattr(mod, _IMPORT_ERROR_ATTR[mod.__name__], None) is not None:
+                continue
+            exercised += 1
+            out = str(Path(d) / f"out_{mod.__name__}.json")
+            args = mod.build_arg_parser().parse_args([
+                "--origin", "LHR", "--destination", "JFK", "--depart-date", "2026-10-15",
+                "--wait-for-human", "-1", "--out", out,
+            ])
+            code = asyncio_run_maybe(mod, args)
+            assert code == output_writer.EXIT_BAD_USAGE, f"{mod.__name__}: got {code}"
+            assert not Path(out).exists()
+    assert exercised > 0, "no engine's driver is installed — this check ran against zero of the three engines"
+
+
 def run() -> int:
     """All @check-decorated functions above already ran at import time
     (that's the point — see the `check()` docstring) and self-registered

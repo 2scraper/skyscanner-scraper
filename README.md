@@ -195,6 +195,32 @@ python3 playwright_scraper.py --origin LHR --destination JFK --depart-date 2026-
   --cdp-endpoint "$SKYSCANNER_CDP_ENDPOINT"
 ```
 
+### When PerimeterX challenges you: `--wait-for-human`
+
+No engine solves PerimeterX's "Press & Hold" (2Captcha has no solver for it
+either). The one path that reliably gets real results today is a person
+completing the challenge once, with the scraper carrying on in that same
+session:
+
+```bash
+# a visible local browser (forced --headful); hold the button when asked
+python3 playwright_scraper.py --origin LHR --destination JFK --depart-date 2026-11-15 \
+  --wait-for-human 120
+
+# or your everyday Chrome, started with a debugging port — best odds, since
+# it is your real fingerprint, IP and cookies
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-skyscanner"
+python3 playwright_scraper.py --origin LHR --destination JFK --depart-date 2026-11-15 \
+  --cdp-endpoint http://127.0.0.1:9222 --wait-for-human 120
+```
+
+On a challenge the scraper prints what to do, re-checks every 2s, and once
+the challenge is gone collects results (including the `web-unified-search`
+XHR). If it is still there after the timeout the run exits `3` (blocked).
+With a remote `--cdp-endpoint` (the Scraping Browser) nobody can see the
+window, so the flag only warns.
+
 `selenium_scraper.py` and `puppeteer_scraper.py` accept the identical flag
 set and produce the identical output contract — see "Engines" for the two
 places they genuinely can't behave the same as Playwright.
@@ -208,7 +234,7 @@ places they genuinely can't behave the same as Playwright.
 --twocaptcha-key --captcha-api --solve-captcha --min-score --cdp-endpoint
 --cdp-block-retries --cookies-file --fingerprint --fp-tags --fp-country
 --stealth --scraper-api --scraper-api-timeout --scraper-api-url
---allow-empty --dump-html --headless/--headful`
+--allow-empty --dump-html --headless/--headful --wait-for-human`
 
 `--cdp-block-retries`, `--cookies-file`, `--stealth`, and `--scraper-api`
 are the four non-honest-messaging mitigations for the confirmed

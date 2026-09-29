@@ -43,6 +43,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import List, Optional, Tuple
 
 try:
@@ -146,6 +147,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cdp-block-retries", type=int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session and retry this many times before giving up. Has no effect without --cdp-endpoint.")
     p.add_argument("--cookies-file", default=None, help="Path to a JSON array of cookies from a session a HUMAN solved manually — loaded before navigating. A way to reuse a person's own solve, never to solve a challenge automatically.")
     p.add_argument("--allow-empty", action="store_true")
+    p.add_argument("--wait-for-human", type=int, default=0, metavar="SECONDS",
+                   help="When the page shows a bot challenge (PerimeterX 'Press & Hold'), wait up to SECONDS "
+                        "for a PERSON to complete it in the browser window, then carry on in that same session. "
+                        "Nothing here solves the challenge; it only waits. Forces --headful unless "
+                        "--cdp-endpoint points at your own local Chrome. 0 (default) = off.")
     p.add_argument("--dump-html", action="store_true")
     p.add_argument("--headless", dest="headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
@@ -443,6 +449,27 @@ async def scrape_search(
         log.warning("Search page returned HTTP %d — treating as blocked, not empty.", status)
         blocked = True
 
+    if args.wait_for_human:
+        async def _page_html() -> str:
+            try:
+                return await page.content()
+            except Exception:  # noqa: BLE001 — the challenge page reloads itself mid-read
+                return ""
+        if detect_from_html(await _page_html(), fp.BOT_CHALLENGE_MARKERS):
+            print("\n>>> Bot challenge in the browser window. Complete it by hand "
+                  f"(press and hold the button). Waiting up to {args.wait_for_human}s...\n", file=sys.stderr, flush=True)
+            deadline = time.time() + args.wait_for_human
+            while time.time() < deadline:
+                await asyncio.sleep(2)
+                html_now = await _page_html()
+                if html_now and not detect_from_html(html_now, fp.BOT_CHALLENGE_MARKERS):
+                    log.info("Challenge cleared by hand — continuing in this session.")
+                    await asyncio.sleep(READINESS_WAIT_S)
+                    blocked = False
+                    break
+            else:
+                log.warning("--wait-for-human: challenge still there after %ds.", args.wait_for_human)
+
     seen_skus: set = set()
     merged: List[Product] = []
     stall = 0
@@ -577,6 +604,17 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Error: unsupported --format {args.format!r}", file=sys.stderr)
         return EXIT_BAD_USAGE
     args.out = args.out or _default_out(args.format)
+    if args.wait_for_human < 0:
+        print("Error: --wait-for-human must be >= 0", file=sys.stderr)
+        return EXIT_BAD_USAGE
+    if args.wait_for_human:
+        if args.cdp_endpoint:
+            if urlparse(args.cdp_endpoint).hostname not in ("localhost", "127.0.0.1", "::1"):
+                log.warning("--wait-for-human with a remote --cdp-endpoint: nobody can see that browser's "
+                            "window, so a challenge there cannot be completed by hand.")
+        elif args.headless:
+            log.info("--wait-for-human needs a visible window: switching to --headful.")
+            args.headless = False
 
     if args.scraper_api:
         # A whole separate, browserless code path — no pyppeteer is needed
