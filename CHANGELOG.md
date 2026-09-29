@@ -9,6 +9,26 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed — 2026-09-29, parser verified against the first REAL skyscanner capture
+- Roman captured a real `web-unified-search` XHR body in his own Chrome
+  (LHR→JFK, 2026-11-15, 373 itineraries). The generic list walk found the
+  right list, but the parser produced **0 rows**: the price is `price.raw`,
+  not `price.amount`, so every itinerary was dropped as price-less.
+- Field mapping fixed against that capture: `price.raw`; airline from
+  `legs[].carriers.marketing[]` (a dict, not a list); deeplink from
+  `pricingOptions[0].items[0].url` (site-relative, now absolutised);
+  currency taken from the deeplink path (the market currency, e.g. GBP,
+  not necessarily the one requested). Old guesses kept as fallbacks.
+  Result: 373/373 rows, all with price, airline, times, stops and a link.
+- `sku` now includes segment flight numbers when known: 5 codeshare pairs
+  (same airline + times, different connecting flight number) collided.
+  DOM-path skus are unchanged.
+- New `flight_parser.parse_search_json()` for an already-decoded search
+  payload. The engines do not intercept this XHR yet — they still only
+  parse HTML, whose initial render is an empty shell with no flights.
+- `fixtures/web_unified_search_lhr_jfk_trimmed.json` (3 real results,
+  tokens stripped) + a smoke check on it — the first non-synthetic fixture.
+
 ### Verified — 2026-09-22, `Captcha.setAutoSolve` coverage audited against a real gap found in shein-scraper
 - Building a sibling family member (flippa-scraper) around Roman's explicit
   requirement that captcha auto-solve be armed on EVERY page an engine

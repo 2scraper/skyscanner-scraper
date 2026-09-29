@@ -1,0 +1,892 @@
+{
+ "_note": "Trimmed REAL web-unified-search XHR body, LHR->JFK 2026-11-15, captured manually in Chrome 2026-09-29. 3 of 373 results kept (one direct + a codeshare pair). Tokens and deeplink query strings stripped.",
+ "itineraries": {
+  "results": [
+   {
+    "id": "13554-2611150745--32171-0-12712-2611151100",
+    "price": {
+     "raw": 322.29,
+     "formatted": "£323",
+     "pricingOptionId": "u_5fswKDWG5P"
+    },
+    "legs": [
+     {
+      "id": "13554-2611150745--32171-0-12712-2611151100",
+      "origin": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "London Heathrow",
+       "displayCode": "LHR",
+       "city": "London",
+       "country": "United Kingdom",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "JFK",
+       "entityId": "95565058",
+       "name": "New York John F. Kennedy",
+       "displayCode": "JFK",
+       "city": "New York",
+       "country": "United States",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 495,
+      "stopCount": 0,
+      "isSmallestStops": false,
+      "departure": "2026-11-15T07:45:00",
+      "arrival": "2026-11-15T11:00:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -32171,
+         "alternateId": "B6",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/B6.png",
+         "name": "jetBlue"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "13554-12712-2611150745-2611151100--32171",
+        "origin": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "London",
+          "type": "City"
+         },
+         "name": "London Heathrow",
+         "type": "Airport",
+         "country": "United Kingdom",
+         "countryId": "UK"
+        },
+        "destination": {
+         "entityId": "95565058",
+         "flightPlaceId": "JFK",
+         "displayCode": "JFK",
+         "parent": {
+          "entityId": "27537542",
+          "flightPlaceId": "NYCA",
+          "displayCode": "NYC",
+          "name": "New York",
+          "type": "City"
+         },
+         "name": "New York John F. Kennedy",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "departure": "2026-11-15T07:45:00",
+        "arrival": "2026-11-15T11:00:00",
+        "durationInMinutes": 495,
+        "flightNumber": "2220",
+        "marketingCarrier": {
+         "id": -32171,
+         "name": "jetBlue",
+         "alternateId": "B6",
+         "allianceId": 0,
+         "displayCode": "B6"
+        },
+        "operatingCarrier": {
+         "id": -32171,
+         "name": "jetBlue",
+         "alternateId": "B6",
+         "allianceId": 0,
+         "displayCode": "B6"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     }
+    ],
+    "isSelfTransfer": false,
+    "isProtectedSelfTransfer": false,
+    "farePolicy": {
+     "isChangeAllowed": false,
+     "isPartiallyChangeable": false,
+     "isCancellationAllowed": false,
+     "isPartiallyRefundable": false
+    },
+    "fareAttributes": {},
+    "isMashUp": false,
+    "hasFlexibleOptions": false,
+    "score": 0.999,
+    "pricingOptions": [
+     {
+      "agentIds": [
+       "gtaf"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 322.29
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 322.29
+        },
+        "segmentIds": [
+         "13554-12712-2611150745-2611151100--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "gtaf",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/gtaf/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "u_5fswKDWG5P",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "wauk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 323.29
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 323.29
+        },
+        "segmentIds": [
+         "13554-12712-2611150745-2611151100--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "wauk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/wauk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "unlMWN1AOwD3",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "bcuk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 331.29
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 331.29
+        },
+        "segmentIds": [
+         "13554-12712-2611150745-2611151100--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "bcuk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/bcuk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "77r7OPP1IMFq",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "eduk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 334.97
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 334.97
+        },
+        "segmentIds": [
+         "13554-12712-2611150745-2611151100--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "eduk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/eduk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "yMxrNYBTeld4",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "xpuk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 339.29
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 339.29
+        },
+        "segmentIds": [
+         "13554-12712-2611150745-2611151100--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "xpuk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/xpuk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "5Xwd_vbU0RXg",
+      "fareAttributes": {}
+     }
+    ]
+   },
+   {
+    "id": "13554-2611150600--31781-2-12712-2611151729",
+    "price": {
+     "raw": 419.97,
+     "formatted": "£420",
+     "pricingOptionId": "ratgd4pawRFA"
+    },
+    "legs": [
+     {
+      "id": "13554-2611150600--31781-2-12712-2611151729",
+      "origin": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "London Heathrow",
+       "displayCode": "LHR",
+       "city": "London",
+       "country": "United Kingdom",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "JFK",
+       "entityId": "95565058",
+       "name": "New York John F. Kennedy",
+       "displayCode": "JFK",
+       "city": "New York",
+       "country": "United States",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 989,
+      "stopCount": 2,
+      "isSmallestStops": false,
+      "departure": "2026-11-15T06:00:00",
+      "arrival": "2026-11-15T17:29:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -31781,
+         "alternateId": "TP",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/TP.png",
+         "name": "TAP Air Portugal"
+        }
+       ],
+       "operating": [
+        {
+         "id": -32171,
+         "alternateId": "B6",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/B6.png",
+         "name": "jetBlue"
+        }
+       ],
+       "operationType": "partially_operated"
+      },
+      "segments": [
+       {
+        "id": "13554-13577-2611150600-2611150850--31781",
+        "origin": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "London",
+          "type": "City"
+         },
+         "name": "London Heathrow",
+         "type": "Airport",
+         "country": "United Kingdom",
+         "countryId": "UK"
+        },
+        "destination": {
+         "entityId": "95565055",
+         "flightPlaceId": "LIS",
+         "displayCode": "LIS",
+         "parent": {
+          "entityId": "27544072",
+          "flightPlaceId": "LISB",
+          "displayCode": "LIS",
+          "name": "Lisbon",
+          "type": "City"
+         },
+         "name": "Lisbon",
+         "type": "Airport",
+         "country": "Portugal",
+         "countryId": "PT"
+        },
+        "departure": "2026-11-15T06:00:00",
+        "arrival": "2026-11-15T08:50:00",
+        "durationInMinutes": 170,
+        "flightNumber": "1363",
+        "marketingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "operatingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       },
+       {
+        "id": "13577-10081-2611151055-2611151400--31781",
+        "origin": {
+         "entityId": "95565055",
+         "flightPlaceId": "LIS",
+         "displayCode": "LIS",
+         "parent": {
+          "entityId": "27544072",
+          "flightPlaceId": "LISB",
+          "displayCode": "LIS",
+          "name": "Lisbon",
+          "type": "City"
+         },
+         "name": "Lisbon",
+         "type": "Airport",
+         "country": "Portugal",
+         "countryId": "PT"
+        },
+        "destination": {
+         "entityId": "95673679",
+         "flightPlaceId": "BOS",
+         "displayCode": "BOS",
+         "parent": {
+          "entityId": "27539525",
+          "flightPlaceId": "BOSA",
+          "displayCode": "BOS",
+          "name": "Boston",
+          "type": "City"
+         },
+         "name": "Boston Logan International",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "departure": "2026-11-15T10:55:00",
+        "arrival": "2026-11-15T14:00:00",
+        "durationInMinutes": 485,
+        "flightNumber": "217",
+        "marketingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "operatingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       },
+       {
+        "id": "10081-12712-2611151609-2611151729--31781",
+        "origin": {
+         "entityId": "95673679",
+         "flightPlaceId": "BOS",
+         "displayCode": "BOS",
+         "parent": {
+          "entityId": "27539525",
+          "flightPlaceId": "BOSA",
+          "displayCode": "BOS",
+          "name": "Boston",
+          "type": "City"
+         },
+         "name": "Boston Logan International",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "destination": {
+         "entityId": "95565058",
+         "flightPlaceId": "JFK",
+         "displayCode": "JFK",
+         "parent": {
+          "entityId": "27537542",
+          "flightPlaceId": "NYCA",
+          "displayCode": "NYC",
+          "name": "New York",
+          "type": "City"
+         },
+         "name": "New York John F. Kennedy",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "departure": "2026-11-15T16:09:00",
+        "arrival": "2026-11-15T17:29:00",
+        "durationInMinutes": 80,
+        "flightNumber": "4313",
+        "marketingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "operatingCarrier": {
+         "id": -32171,
+         "name": "jetBlue",
+         "alternateId": "B6",
+         "allianceId": 0,
+         "displayCode": "B6"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     }
+    ],
+    "isSelfTransfer": false,
+    "isProtectedSelfTransfer": false,
+    "farePolicy": {
+     "isChangeAllowed": false,
+     "isPartiallyChangeable": false,
+     "isCancellationAllowed": false,
+     "isPartiallyRefundable": false
+    },
+    "fareAttributes": {},
+    "isMashUp": false,
+    "hasFlexibleOptions": false,
+    "score": 0.341394,
+    "pricingOptions": [
+     {
+      "agentIds": [
+       "eduk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 419.97
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 419.97
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--31781"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "eduk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/eduk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "ratgd4pawRFA",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "wauk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 425.15
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 425.15
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--31781"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "wauk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/wauk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "Dim_vbVILPch",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "xpuk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 430.15
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 430.15
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--31781"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "xpuk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/xpuk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "65C20Lxx-DMo",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "bcuk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 430.15
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 430.15
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--31781"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "bcuk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/bcuk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "kDi1oSlYqP8V",
+      "fareAttributes": {}
+     },
+     {
+      "agentIds": [
+       "tap_"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 430.16
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 430.16
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--31781"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "tap_",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/tap_/1/13554.12712.2026-11-15/air/airli/flights"
+       }
+      ],
+      "pricingOptionId": "4ICmavixzGiJ",
+      "fareAttributes": {}
+     }
+    ]
+   },
+   {
+    "id": "13554-2611150600--31781,-32171-2-12712-2611151729",
+    "price": {
+     "raw": 430.15,
+     "formatted": "£431",
+     "pricingOptionId": "TZFz9NjCV0NF"
+    },
+    "legs": [
+     {
+      "id": "13554-2611150600--31781,-32171-2-12712-2611151729",
+      "origin": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "London Heathrow",
+       "displayCode": "LHR",
+       "city": "London",
+       "country": "United Kingdom",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "JFK",
+       "entityId": "95565058",
+       "name": "New York John F. Kennedy",
+       "displayCode": "JFK",
+       "city": "New York",
+       "country": "United States",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 989,
+      "stopCount": 2,
+      "isSmallestStops": false,
+      "departure": "2026-11-15T06:00:00",
+      "arrival": "2026-11-15T17:29:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -31781,
+         "alternateId": "TP",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/TP.png",
+         "name": "TAP Air Portugal"
+        },
+        {
+         "id": -32171,
+         "alternateId": "B6",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/B6.png",
+         "name": "jetBlue"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "13554-13577-2611150600-2611150850--31781",
+        "origin": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "London",
+          "type": "City"
+         },
+         "name": "London Heathrow",
+         "type": "Airport",
+         "country": "United Kingdom",
+         "countryId": "UK"
+        },
+        "destination": {
+         "entityId": "95565055",
+         "flightPlaceId": "LIS",
+         "displayCode": "LIS",
+         "parent": {
+          "entityId": "27544072",
+          "flightPlaceId": "LISB",
+          "displayCode": "LIS",
+          "name": "Lisbon",
+          "type": "City"
+         },
+         "name": "Lisbon",
+         "type": "Airport",
+         "country": "Portugal",
+         "countryId": "PT"
+        },
+        "departure": "2026-11-15T06:00:00",
+        "arrival": "2026-11-15T08:50:00",
+        "durationInMinutes": 170,
+        "flightNumber": "1363",
+        "marketingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "operatingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       },
+       {
+        "id": "13577-10081-2611151055-2611151400--31781",
+        "origin": {
+         "entityId": "95565055",
+         "flightPlaceId": "LIS",
+         "displayCode": "LIS",
+         "parent": {
+          "entityId": "27544072",
+          "flightPlaceId": "LISB",
+          "displayCode": "LIS",
+          "name": "Lisbon",
+          "type": "City"
+         },
+         "name": "Lisbon",
+         "type": "Airport",
+         "country": "Portugal",
+         "countryId": "PT"
+        },
+        "destination": {
+         "entityId": "95673679",
+         "flightPlaceId": "BOS",
+         "displayCode": "BOS",
+         "parent": {
+          "entityId": "27539525",
+          "flightPlaceId": "BOSA",
+          "displayCode": "BOS",
+          "name": "Boston",
+          "type": "City"
+         },
+         "name": "Boston Logan International",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "departure": "2026-11-15T10:55:00",
+        "arrival": "2026-11-15T14:00:00",
+        "durationInMinutes": 485,
+        "flightNumber": "217",
+        "marketingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "operatingCarrier": {
+         "id": -31781,
+         "name": "TAP Air Portugal",
+         "alternateId": "TP",
+         "allianceId": -31999,
+         "displayCode": "TP"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       },
+       {
+        "id": "10081-12712-2611151609-2611151729--32171",
+        "origin": {
+         "entityId": "95673679",
+         "flightPlaceId": "BOS",
+         "displayCode": "BOS",
+         "parent": {
+          "entityId": "27539525",
+          "flightPlaceId": "BOSA",
+          "displayCode": "BOS",
+          "name": "Boston",
+          "type": "City"
+         },
+         "name": "Boston Logan International",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "destination": {
+         "entityId": "95565058",
+         "flightPlaceId": "JFK",
+         "displayCode": "JFK",
+         "parent": {
+          "entityId": "27537542",
+          "flightPlaceId": "NYCA",
+          "displayCode": "NYC",
+          "name": "New York",
+          "type": "City"
+         },
+         "name": "New York John F. Kennedy",
+         "type": "Airport",
+         "country": "United States",
+         "countryId": "US"
+        },
+        "departure": "2026-11-15T16:09:00",
+        "arrival": "2026-11-15T17:29:00",
+        "durationInMinutes": 80,
+        "flightNumber": "317",
+        "marketingCarrier": {
+         "id": -32171,
+         "name": "jetBlue",
+         "alternateId": "B6",
+         "allianceId": 0,
+         "displayCode": "B6"
+        },
+        "operatingCarrier": {
+         "id": -32171,
+         "name": "jetBlue",
+         "alternateId": "B6",
+         "allianceId": 0,
+         "displayCode": "B6"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     }
+    ],
+    "isSelfTransfer": false,
+    "isProtectedSelfTransfer": false,
+    "farePolicy": {
+     "isChangeAllowed": false,
+     "isPartiallyChangeable": false,
+     "isCancellationAllowed": false,
+     "isPartiallyRefundable": false
+    },
+    "fareAttributes": {},
+    "isMashUp": false,
+    "hasFlexibleOptions": false,
+    "score": 0.333348,
+    "pricingOptions": [
+     {
+      "agentIds": [
+       "xpuk"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 430.15
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 430.15
+        },
+        "segmentIds": [
+         "13554-13577-2611150600-2611150850--31781",
+         "13577-10081-2611151055-2611151400--31781",
+         "10081-12712-2611151609-2611151729--32171"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "xpuk",
+        "url": "/transport_deeplink/4.0/UK/en-GB/GBP/xpuk/1/13554.12712.2026-11-15/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "TZFz9NjCV0NF",
+      "fareAttributes": {}
+     }
+    ]
+   }
+  ]
+ }
+}

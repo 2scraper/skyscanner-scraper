@@ -152,11 +152,17 @@ def make_sku(
     depart_date: Optional[str], return_date: Optional[str],
     airline: Optional[str], departure_time: Optional[str],
     arrival_time: Optional[str], cabin_class: Optional[str],
+    flight_numbers: Optional[List[str]] = None,
 ) -> str:
     basis = "|".join(str(x or "") for x in (
         origin, destination, depart_date, return_date, airline,
         departure_time, arrival_time, cabin_class,
     ))
+    # Codeshares: two offers can share airline + times but differ in the
+    # marketing flight number of a connecting segment (seen live: TP4313 vs
+    # B6317 on BOS→JFK). Appended only when known, so DOM-path skus are unchanged.
+    if flight_numbers:
+        basis += "|" + ",".join(flight_numbers)
     digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
     route = f"{origin or '??'}{destination or '??'}"
     date_part = (depart_date or "").replace("-", "")
@@ -242,8 +248,12 @@ def _itinerary_node_to_product(
     None (rather than a half-populated Product) if not even a price can be
     found, so a shape this guess gets wrong degrades to "found nothing
     here" instead of fabricating a row with a fake price."""
+    # Verified 2026-09-29 against a real `web-unified-search` response
+    # (LHR→JFK, 373 itineraries): the price lives in `price.raw` (float) with
+    # `price.formatted` alongside ("£323"); `amount` only appears inside
+    # `pricingOptions[].price`. The other paths are kept as fallbacks.
     price = (
-        _num(node, "price", "amount") or _num(node, "price")
+        _num(node, "price", "raw") or _num(node, "price", "amount") or _num(node, "price")
         or _num(node, "totalPrice", "amount") or _num(node, "totalPrice")
         or _num(node, "minPrice")
     )
@@ -252,7 +262,11 @@ def _itinerary_node_to_product(
 
     legs = node.get("legs") if isinstance(node.get("legs"), list) else []
     leg0 = legs[0] if legs and isinstance(legs[0], dict) else {}
-    carriers = leg0.get("carriers") if isinstance(leg0.get("carriers"), list) else None
+    carriers = leg0.get("carriers")
+    if isinstance(carriers, dict):
+        # Real shape: {"marketing": [{"name": "jetBlue", ...}], "operationType": ...}
+        carriers = carriers.get("marketing")
+    carriers = carriers if isinstance(carriers, list) else None
     airline = None
     if carriers and isinstance(carriers[0], dict):
         airline = carriers[0].get("name")
@@ -273,11 +287,31 @@ def _itinerary_node_to_product(
     )
 
     deep_link = node.get("deeplink") or node.get("deepLink") or node.get("bookingUrl")
+    if not deep_link:
+        # Real shape: pricingOptions[0].items[0].url — a site-relative
+        # "/transport_deeplink/4.0/UK/en-GB/GBP/<agent>/..." path.
+        opts = node.get("pricingOptions")
+        items = opts[0].get("items") if opts and isinstance(opts[0], dict) else None
+        if items and isinstance(items[0], dict):
+            deep_link = items[0].get("url")
+    if isinstance(deep_link, str) and deep_link.startswith("/"):
+        deep_link = BASE_URL + deep_link
+    # The site prices in the market's currency, not necessarily the one
+    # requested — the deeplink path carries the real one (".../en-GB/GBP/...").
+    m = re.search(r"/transport_deeplink/[^/]+/[^/]+/[^/]+/([A-Z]{3})/", deep_link or "")
+    if m:
+        currency = m.group(1)
 
+    flight_numbers = [
+        f"{(seg.get('marketingCarrier') or {}).get('displayCode', '')}{seg.get('flightNumber', '')}"
+        for leg in legs if isinstance(leg, dict)
+        for seg in (leg.get("segments") or []) if isinstance(seg, dict) and seg.get("flightNumber")
+    ]
     sku = make_sku(
         origin=origin, destination=destination, depart_date=depart_date,
         return_date=return_date, airline=airline, departure_time=departure_time,
         arrival_time=arrival_time, cabin_class=cabin_class,
+        flight_numbers=flight_numbers,
     )
     title = f"{origin} → {destination}" + (f" · {airline}" if airline else "")
 
@@ -311,6 +345,33 @@ def _itinerary_node_to_product(
 class SearchResult:
     products: List[Product]
     source_used: str  # "embedded_json" | "dom" | "none"
+
+
+def parse_search_json(
+    data: Any, *, origin: str, destination: str, depart_date: str,
+    return_date: Optional[str] = None, adults: int = 1, currency: str = "USD",
+    cabin_class: str = "economy", stops: str = "any", sort: str = "best",
+    max_results: Optional[int] = None,
+) -> SearchResult:
+    """Parse an already-decoded search JSON payload — e.g. the body of the
+    `web-unified-search` XHR (`itineraries.results[]`), which is where the
+    real flight list arrives; the initial HTML is only an empty shell (see
+    README). Uses the same generic itinerary-list walk as the HTML path."""
+    candidate_lists = _find_itinerary_lists(data)
+    if not candidate_lists:
+        return SearchResult(products=[], source_used="none")
+    products = []
+    for node in max(candidate_lists, key=len):
+        p = _itinerary_node_to_product(
+            node, origin=origin, destination=destination, depart_date=depart_date,
+            return_date=return_date, adults=adults, cabin_class=cabin_class,
+            stops=stops, sort=sort, currency=currency,
+        )
+        if p is not None:
+            products.append(p)
+        if max_results and len(products) >= max_results:
+            break
+    return SearchResult(products=products, source_used="embedded_json" if products else "none")
 
 
 def parse_search_results(

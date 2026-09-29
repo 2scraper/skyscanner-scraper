@@ -234,6 +234,18 @@ def _():
     assert res.source_used == "none"
 
 
+@check("parse_search_json maps a REAL captured web-unified-search body (fixtures/, 2026-09-29) into fully populated rows")
+def _():
+    data = json.loads((Path(__file__).parent / "fixtures" / "web_unified_search_lhr_jfk_trimmed.json").read_text())
+    res = fp.parse_search_json(data, origin="LHR", destination="JFK", depart_date="2026-11-15")
+    assert res.source_used == "embedded_json" and len(res.products) == 3
+    p = res.products[0]
+    assert (p.price, p.currency, p.brand, p.stops) == (322.29, "GBP", "jetBlue", "Direct")
+    assert (p.departure_time, p.arrival_time, p.duration) == ("2026-11-15T07:45:00", "2026-11-15T11:00:00", "8h 15m")
+    assert p.product_url.startswith("https://www.skyscanner.com/transport_deeplink/")
+    assert res.products[1].sku != res.products[2].sku, "codeshare pair (same times, different flight numbers) must not collide"
+
+
 @check("safe_parse_search_results degrades a parse exception to an empty result, never propagates (mirrors the family's per-worker-page crash fix)")
 def _():
     import unittest.mock as mock
