@@ -241,7 +241,7 @@ def _num(node: Any, *path: str) -> Optional[float]:
 def _itinerary_node_to_product(
     node: dict, *, origin: str, destination: str, depart_date: str,
     return_date: Optional[str], adults: int, cabin_class: str,
-    stops: str, sort: str, currency: str,
+    stops: str, sort: str, currency: str, price_source: str = "embedded_json",
 ) -> Optional[Product]:
     """# TODO: verify live — field names below (`price`/`legs[0].carriers`/
     `legs[0].departure`/...) are a best-effort guess at a plausible Apollo/
@@ -299,9 +299,10 @@ def _itinerary_node_to_product(
         deep_link = BASE_URL + deep_link
     # The site prices in the market's currency, not necessarily the one
     # requested — the deeplink path carries the real one (".../en-GB/GBP/...").
+    # Not read from the data → null, never the requested --currency
+    # (CLAUDE.md §8: "Missing currency is null").
     m = re.search(r"/transport_deeplink/[^/]+/[^/]+/[^/]+/([A-Z]{3})/", deep_link or "")
-    if m:
-        currency = m.group(1)
+    currency = m.group(1) if m else None
 
     flight_numbers = [
         f"{(seg.get('marketingCarrier') or {}).get('displayCode', '')}{seg.get('flightNumber', '')}"
@@ -324,7 +325,7 @@ def _itinerary_node_to_product(
         brand=airline,
         price=price,
         currency=currency,
-        price_source="embedded_json",
+        price_source=price_source,
         product_url=deep_link or None,
         image_url=None,
         scraped_at=_now_iso(),
@@ -366,13 +367,13 @@ def parse_search_json(
         p = _itinerary_node_to_product(
             node, origin=origin, destination=destination, depart_date=depart_date,
             return_date=return_date, adults=adults, cabin_class=cabin_class,
-            stops=stops, sort=sort, currency=currency,
+            stops=stops, sort=sort, currency=currency, price_source="search_api",
         )
         if p is not None:
             products.append(p)
         if max_results and len(products) >= max_results:
             break
-    return SearchResult(products=products, source_used="embedded_json" if products else "none")
+    return SearchResult(products=products, source_used="search_api" if products else "none")
 
 
 # --------------------------------------------------------------------------- #
@@ -441,6 +442,27 @@ def combine_results(api: SearchResult, html: SearchResult) -> SearchResult:
     skus = {p.sku for p in api.products}
     extra = [p for p in html.products if p.sku not in skus]
     return SearchResult(products=api.products + extra, source_used=api.source_used)
+
+
+def search_meta(capture: SearchApiCapture, *, collected: int, max_results: int) -> dict:
+    """The site's own arithmetic beside `status` (CLAUDE.md §21 "complete and
+    exhaustive are different words"): how many itineraries the search API
+    offered, whether it had finished, and whether --max-results cut it."""
+    ids = set()
+    for body in capture.payloads:
+        for lst in _find_itinerary_lists(body):
+            ids.update(str(n.get("id")) for n in lst if isinstance(n, dict) and n.get("id"))
+    available = len(ids) if ids else None
+    capped = available is not None and collected >= max_results and available > collected
+    return {
+        "results_source": "search_api" if capture.payloads else "html",
+        "search_api_responses": len(capture.payloads),
+        "search_api_status": capture.status,
+        "itineraries_available": available,
+        "capped_by_max_results": capped,
+        # still polling when we stopped, and not because of our own cap
+        "search_incomplete": capture.incomplete and not capped,
+    }
 
 
 def parse_search_results(
@@ -574,7 +596,7 @@ def _parse_result_cards_from_dom(
         title = f"{origin} → {destination}" + (f" · {airline}" if airline else "")
         products.append(Product(
             sku=sku, source=SOURCE, category="flights", title=title, brand=airline,
-            price=price, currency=currency, price_source="dom", product_url=deep_link,
+            price=price, currency=None, price_source="dom", product_url=deep_link,
             image_url=None, scraped_at=_now_iso(), origin=origin, destination=destination,
             depart_date=depart_date, return_date=return_date, adults=adults,
             cabin_class=cabin_class, stops=stops_label or stops, departure_time=departure_time,

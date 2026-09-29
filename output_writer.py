@@ -225,13 +225,16 @@ def finish_run(
     price_confirmed_pct: Optional[float] = None,
     extra_meta: Optional[dict] = None,
     stop_reason: Optional[str] = None,
+    incomplete: bool = False,
 ) -> int:
     """Decide status/exit code, write output + sidecar (or neither), return
     the process exit code. NEVER writes a sidecar for a failed run, and
     NEVER overwrites a previous good output with an empty one unless the
     caller explicitly passed --allow-empty."""
     failed_pages = failed_pages or []
-    partial = bool(failed_pages) and pages_completed > 0
+    # `incomplete`: the site itself had not finished serving (e.g. a search
+    # API still reporting "incomplete") when the run stopped.
+    partial = (bool(failed_pages) and pages_completed > 0) or (incomplete and bool(products))
     zero_products = len(products) == 0
 
     # Outcome precedence — decided ONCE, independent of --allow-empty.

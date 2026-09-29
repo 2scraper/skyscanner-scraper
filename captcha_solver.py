@@ -208,6 +208,7 @@ def solve_when_blocked(
     extra_markers: Sequence[str] = (),
     proxyless: bool = True,
     min_score: float = 0.3,
+    allow_paid_solve: bool = True,
 ) -> dict:
     """The default `--solve-captcha when-blocked` policy. Cheap first: count
     product links on the page AS-IS — no readiness wait, no scroll — because
@@ -228,6 +229,11 @@ def solve_when_blocked(
             return {"action": "unsupported_vendor", "vendor": vendor}
         return {"action": "detected_unidentified_widget"}
 
+    if not allow_paid_solve:
+        # A token the caller cannot inject buys nothing (CLAUDE.md §23:
+        # "we solved it" and "the token got in" are different claims).
+        return {"action": "solve_not_attempted", "captcha_type": signal.captcha_type.value,
+                "reason": "no token-injection path for this site"}
     try:
         task = _task_payload(signal, page_url, proxyless=proxyless, min_score=min_score)
         token = client.solve_and_wait(task)

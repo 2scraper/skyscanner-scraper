@@ -9,6 +9,31 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed — 2026-09-29, template audit: status, currency, blocks and paid solves
+- **"complete" said nothing about how much.** The sidecar now carries the
+  site's own arithmetic: `results_source`, `search_api_status`,
+  `itineraries_available`, `capped_by_max_results`. A run capped by
+  `--max-results` is `complete` with `stop_reason: max_results` (live: 30 of
+  389). A run that stopped while the search API still said "incomplete"
+  (and not because of our cap) is now `partial` / exit 6 with
+  `stop_reason: search_incomplete` (was `complete`). Verified on a local
+  stand in all three engines, and live over local Chrome.
+- **Currency was defaulted.** Rows now carry the currency the data states
+  (the deeplink's market currency) or `null` — never the requested
+  `--currency`. DOM-path rows are `null`.
+- **XHR rows said `price_source: embedded_json`.** They now say
+  `search_api` (so `diff_runs` reports a switch between paths as
+  `source_changed`).
+- **One challenge marker threw away good data.** A marker/error status on a
+  run that collected itineraries no longer turns it into exit 3 (§8:
+  detected ≠ blocking).
+- **Paid solves bought nothing.** No engine injects a solved token, so
+  engines now call `solve_when_blocked(..., allow_paid_solve=False)`: a
+  recognised widget is logged as `solve_not_attempted` and nothing is
+  spent. The "page already has results" check also counts itineraries from
+  the XHR, which the DOM card count cannot see. `--solve-captcha always`
+  was read nowhere and is removed (`off` / `when-blocked`).
+
 ### Fixed — 2026-09-29, template audit: Docker image and batch contract
 - The Docker build would have failed: `batch_scraper.py` and `fixtures/`
   were not COPYed (and `.dockerignore` dropped `*.json`). Both added,

@@ -150,7 +150,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--proxy-block-retries", type=int, default=3)
     p.add_argument("--twocaptcha-key", default=None, help="(or set TWOCAPTCHA_KEY)")
     p.add_argument("--captcha-api", default=None, help="Override the 2Captcha API base URL (testing only)")
-    p.add_argument("--solve-captcha", choices=["off", "when-blocked", "always"], default="when-blocked")
+    p.add_argument("--solve-captcha", choices=["off", "when-blocked"], default="when-blocked")
     p.add_argument("--min-score", type=float, default=0.3, help="Minimum acceptable reCAPTCHA v3 score (2Captcha's minScore task field)")
     p.add_argument("--cdp-endpoint", default=None, help="Connect to a remote CDP session (e.g. the 2Captcha Scraping Browser API) instead of launching locally (or set SKYSCANNER_CDP_ENDPOINT) — opt-in, not required for a normal run")
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session (a different exit identity from the pool) and retry this many times before giving up. Reputation/behavior-based defenses sometimes simply don't challenge a fresh session at all. Has no effect without --cdp-endpoint.")
@@ -335,11 +335,16 @@ async def _enable_scraping_browser_auto_solve(context: BrowserContext, page: Pag
 
 async def _maybe_solve_captcha(
     *, html: str, url: str, client: Optional[TwoCaptchaClient], policy: str, min_score: float = 0.3,
+    rows_seen: int = 0,
 ) -> Optional[dict]:
     if policy == "off" or client is None:
         return None
     result = solve_when_blocked(
-        client=client, page_url=url, html=html, count_product_links=fp.count_result_cards,
+        client=client, page_url=url, html=html,
+        # Itineraries already collected (mostly from the search-API XHR, which
+        # the DOM card count cannot see) mean the page is not gated.
+        count_product_links=lambda h: fp.count_result_cards(h) + rows_seen,
+        allow_paid_solve=False,
         extra_markers=fp.BOT_CHALLENGE_MARKERS, min_score=min_score,
     )
     action = result.get("action")
@@ -386,7 +391,7 @@ async def _connect_over_cdp(pw, cdp_endpoint: str):
 async def scrape_search(
     *, args: argparse.Namespace, start_url: str, browser: Browser,
     proxy_pool: Optional[ProxyPool], client: Optional[TwoCaptchaClient],
-    autosolve: bool, user_agent: Optional[str], cookies: Optional[list] = None,
+    autosolve: bool, user_agent: Optional[str], cookies: Optional[list] = None, stats: Optional[dict] = None,
 ) -> tuple:
     """Returns (products, blocked, remote_api_error, scroll_rounds_done, scroll_error).
 
@@ -518,8 +523,8 @@ async def scrape_search(
                 break
         if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
             blocked = True
-        captcha_result = await _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score)
-        if captcha_result and captcha_result.get("action") in ("warning_no_key", "warning_solver_error", "detected_unidentified_widget", "unsupported_vendor"):
+        captcha_result = await _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score, rows_seen=len(merged) + len(capture.payloads))
+        if captcha_result and captcha_result.get("action") in ("warning_no_key", "warning_solver_error", "detected_unidentified_widget", "unsupported_vendor", "solve_not_attempted"):
             if fp.count_result_cards(html) == 0:
                 blocked = True
 
@@ -592,6 +597,17 @@ async def scrape_search(
             Path(_dump_path(args.out)).write_text(final_html, encoding="utf-8")
 
     await (page.close() if reuse_profile else context.close())
+    if blocked and merged:
+        # CLAUDE.md §8: detected ≠ blocking. A challenge marker (or an error
+        # status) on a run that collected itineraries guarded nothing.
+        log.warning("A challenge/error was seen, but %d itineraries were collected — reporting the data, not a block.", len(merged))
+        blocked = False
+    if stats is not None:
+        stats.clear()
+        stats.update(fp.search_meta(capture, collected=len(merged), max_results=args.max_results))
+        if stats["search_incomplete"]:
+            log.warning("Stopped while the search was still incomplete (%s itineraries offered so far) — reporting partial.",
+                        stats["itineraries_available"])
     return merged, blocked, remote_api_error, rounds, scroll_error
 
 
@@ -668,6 +684,7 @@ def _scrape_via_scraper_api(
 
 async def run(args: argparse.Namespace) -> int:
     started_at = time.time()
+    search_stats: dict = {}
     if async_playwright is None:
         print(f"Error: playwright is not installed ({_PLAYWRIGHT_IMPORT_ERROR}). "
               f"pip install -r requirements-playwright.txt && playwright install chromium", file=sys.stderr)
@@ -817,7 +834,7 @@ async def run(args: argparse.Namespace) -> int:
 
                     merged, blocked, remote_api_error, rounds, scroll_error = await scrape_search(
                         args=args, start_url=start_url, browser=browser, proxy_pool=proxy_pool,
-                        client=client, autosolve=autosolve, user_agent=user_agent, cookies=cookies,
+                        client=client, autosolve=autosolve, user_agent=user_agent, cookies=cookies, stats=search_stats,
                     )
                     await browser.close()
 
@@ -835,7 +852,7 @@ async def run(args: argparse.Namespace) -> int:
                 autosolve = False
                 merged, blocked, remote_api_error, rounds, scroll_error = await scrape_search(
                     args=args, start_url=start_url, browser=browser, proxy_pool=proxy_pool,
-                    client=client, autosolve=autosolve, user_agent=user_agent, cookies=cookies,
+                    client=client, autosolve=autosolve, user_agent=user_agent, cookies=cookies, stats=search_stats,
                 )
                 await browser.close()
     except Exception:
@@ -875,6 +892,10 @@ async def run(args: argparse.Namespace) -> int:
         allow_empty=args.allow_empty,
         started_at=started_at,
         price_confirmed_pct=price_confirmed_pct,
+        extra_meta=search_stats or None,
+        incomplete=bool(search_stats.get("search_incomplete")),
+        stop_reason=("search_incomplete" if search_stats.get("search_incomplete")
+                     else "max_results" if search_stats.get("capped_by_max_results") else None),
     )
 
 

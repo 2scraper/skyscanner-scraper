@@ -238,8 +238,9 @@ def _():
 def _():
     data = json.loads((Path(__file__).parent / "fixtures" / "web_unified_search_lhr_jfk_trimmed.json").read_text())
     res = fp.parse_search_json(data, origin="LHR", destination="JFK", depart_date="2026-11-15")
-    assert res.source_used == "embedded_json" and len(res.products) == 3
+    assert res.source_used == "search_api" and len(res.products) == 3
     p = res.products[0]
+    assert p.price_source == "search_api", "XHR rows must not be labelled as embedded page JSON"
     assert (p.price, p.currency, p.brand, p.stops) == (322.29, "GBP", "jetBlue", "Direct")
     assert (p.departure_time, p.arrival_time, p.duration) == ("2026-11-15T07:45:00", "2026-11-15T11:00:00", "8h 15m")
     assert p.product_url.startswith("https://www.skyscanner.com/transport_deeplink/")
@@ -307,6 +308,55 @@ def _():
     assert cap.payloads == [] and pending == {"1", "3"}
     ss._drain_search_api_responses(drv, cap, pending)
     assert len(cap.payloads) == 2 and pending == set()
+
+
+@check("currency is null when the data does not state it — never the requested --currency (CLAUDE.md §8)")
+def _():
+    import copy
+    body = copy.deepcopy(_real_fixture())
+    for n in body["itineraries"]["results"]:
+        for po in n["pricingOptions"]:
+            for it in po["items"]:
+                it["url"] = "/no-currency-here"
+    res = fp.parse_search_json(body, origin="LHR", destination="JFK", depart_date="2026-11-15", currency="EUR")
+    assert res.products and all(p.currency is None for p in res.products), [p.currency for p in res.products]
+    real = fp.parse_search_json(_real_fixture(), origin="LHR", destination="JFK", depart_date="2026-11-15", currency="EUR")
+    assert {p.currency for p in real.products} == {"GBP"}, "the currency the data states wins over the request"
+
+
+@check("search_meta: capped by --max-results is complete-but-capped; still polling and not capped is search_incomplete (→ partial)")
+def _():
+    body = _real_fixture()
+    cap = fp.SearchApiCapture(); cap.add({"context": {"status": "complete"}, **body})
+    m = fp.search_meta(cap, collected=2, max_results=2)
+    assert m["itineraries_available"] == 3 and m["capped_by_max_results"] and not m["search_incomplete"]
+    cap2 = fp.SearchApiCapture(); cap2.add({"context": {"status": "incomplete"}, **body})
+    m2 = fp.search_meta(cap2, collected=3, max_results=30)
+    assert m2["search_incomplete"] and not m2["capped_by_max_results"] and m2["search_api_status"] == "incomplete"
+    assert fp.search_meta(fp.SearchApiCapture(), collected=5, max_results=30)["results_source"] == "html"
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "o.json")
+        row = fp.parse_search_json(body, origin="LHR", destination="JFK", depart_date="2026-11-15").products[:1]
+        code = output_writer.finish_run(products=row, out_path=out, fmt="json", engine="t", url="u",
+                                        pages_requested=1, pages_completed=1, failed_pages=None, blocked=False,
+                                        remote_api_error=False, allow_empty=False, started_at=0.0,
+                                        incomplete=True, stop_reason="search_incomplete", extra_meta=m2)
+        meta = json.loads(Path(out + ".meta.json").read_text())
+        assert code == output_writer.EXIT_PARTIAL and meta["status"] == "partial" and meta["stop_reason"] == "search_incomplete"
+
+
+@check("solve_when_blocked with allow_paid_solve=False never calls the solver, and rows already seen mean 'not gated'")
+def _():
+    class NoPay:
+        def solve_and_wait(self, task):
+            raise AssertionError("a paid solve was attempted")
+    html = '<div class="g-recaptcha" data-sitekey="6Lc_aCMTAAAAABx7u2W0WPXnVbI_v6ZdbM6rYf16"></div><script src="https://www.google.com/recaptcha/api.js"></script>'
+    r = captcha_solver.solve_when_blocked(client=NoPay(), page_url="https://x", html=html,
+                                          count_product_links=lambda h: 0, allow_paid_solve=False)
+    assert r["action"] == "solve_not_attempted", r
+    r = captcha_solver.solve_when_blocked(client=NoPay(), page_url="https://x", html=html,
+                                          count_product_links=lambda h: 0 + 5, allow_paid_solve=False)
+    assert r["action"] == "skipped_products_present", r
 
 
 @check("safe_parse_search_results degrades a parse exception to an empty result, never propagates (mirrors the family's per-worker-page crash fix)")
@@ -952,7 +1002,7 @@ def _():
         with mock.patch.object(mod, "solve_when_blocked", return_value=fake_result):
             outcome = mod._maybe_solve_captcha(
                 html="<html></html>", url="https://example.invalid", client=_FakeClient(),
-                policy="always", min_score=0.3,
+                policy="when-blocked", min_score=0.3,
             )
             if _inspect.iscoroutine(outcome):
                 outcome = asyncio.run(outcome)

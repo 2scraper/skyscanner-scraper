@@ -133,7 +133,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--proxy-block-retries", type=int, default=3)
     p.add_argument("--twocaptcha-key", default=None)
     p.add_argument("--captcha-api", default=None, help="Override the 2Captcha API base URL (testing only)")
-    p.add_argument("--solve-captcha", choices=["off", "when-blocked", "always"], default="when-blocked")
+    p.add_argument("--solve-captcha", choices=["off", "when-blocked"], default="when-blocked")
     p.add_argument("--min-score", type=float, default=0.3, help="Minimum acceptable reCAPTCHA v3 score (2Captcha's minScore task field)")
     p.add_argument("--fingerprint", action="store_true", help="Fetch and apply a 2Captcha Fingerprint API profile's user agent (ignored with --cdp-endpoint — see fingerprint_client.refuse_if_cdp)")
     p.add_argument("--fp-tags", default=None, help="Fingerprint API filter, e.g. 'Windows'")
@@ -392,11 +392,15 @@ _STATUS_JS = (
 )
 
 
-def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptchaClient], policy: str, min_score: float = 0.3) -> Optional[dict]:
+def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptchaClient], policy: str, min_score: float = 0.3, rows_seen: int = 0) -> Optional[dict]:
     if policy == "off" or client is None:
         return None
     result = solve_when_blocked(
-        client=client, page_url=url, html=html, count_product_links=fp.count_result_cards,
+        client=client, page_url=url, html=html,
+        # Itineraries already collected (mostly from the search-API XHR, which
+        # the DOM card count cannot see) mean the page is not gated.
+        count_product_links=lambda h: fp.count_result_cards(h) + rows_seen,
+        allow_paid_solve=False,
         extra_markers=fp.BOT_CHALLENGE_MARKERS, min_score=min_score,
     )
     action = result.get("action")
@@ -463,7 +467,7 @@ def _drain_search_api_responses(driver, capture: "fp.SearchApiCapture", pending:
 def scrape_search(
     *, args: argparse.Namespace, start_url: str,
     proxy_pool: Optional[ProxyPool], client: Optional[TwoCaptchaClient],
-    user_agent: Optional[str] = None, cookies: Optional[list] = None,
+    user_agent: Optional[str] = None, cookies: Optional[list] = None, stats: Optional[dict] = None,
 ) -> Tuple[List[Product], bool, bool, int, bool]:
     """Returns (products, blocked, remote_api_error, scroll_rounds_done, scroll_error).
 
@@ -562,8 +566,8 @@ def scrape_search(
         html = driver.page_source
         if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
             blocked = True
-        captcha_result = _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score)
-        if captcha_result and captcha_result.get("action") in ("warning_no_key", "warning_solver_error", "detected_unidentified_widget", "unsupported_vendor"):
+        captcha_result = _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score, rows_seen=len(merged) + len(capture.payloads))
+        if captcha_result and captcha_result.get("action") in ("warning_no_key", "warning_solver_error", "detected_unidentified_widget", "unsupported_vendor", "solve_not_attempted"):
             if fp.count_result_cards(html) == 0:
                 blocked = True
 
@@ -620,6 +624,17 @@ def scrape_search(
         Path(_dump_path(args.out)).write_text(driver.page_source, encoding="utf-8")
 
     driver.quit()
+    if blocked and merged:
+        # CLAUDE.md §8: detected ≠ blocking. A challenge marker (or an error
+        # status) on a run that collected itineraries guarded nothing.
+        log.warning("A challenge/error was seen, but %d itineraries were collected — reporting the data, not a block.", len(merged))
+        blocked = False
+    if stats is not None:
+        stats.clear()
+        stats.update(fp.search_meta(capture, collected=len(merged), max_results=args.max_results))
+        if stats["search_incomplete"]:
+            log.warning("Stopped while the search was still incomplete (%s itineraries offered so far) — reporting partial.",
+                        stats["itineraries_available"])
     return merged, blocked, remote_api_error, rounds, scroll_error
 
 
@@ -677,6 +692,7 @@ def _scrape_via_scraper_api(
 
 def run(args: argparse.Namespace) -> int:
     started_at = time.time()
+    search_stats: dict = {}
     start_url = _resolve_start_url(args)
     if not start_url:
         print("Error: provide --url, or --origin/--destination/--depart-date", file=sys.stderr)
@@ -796,7 +812,7 @@ def run(args: argparse.Namespace) -> int:
             for attempt in range(attempts):
                 merged, blocked, remote_api_error, rounds, scroll_error = scrape_search(
                     args=args, start_url=start_url, proxy_pool=proxy_pool, client=client,
-                    user_agent=user_agent, cookies=cookies,
+                    user_agent=user_agent, cookies=cookies, stats=search_stats,
                 )
                 if remote_api_error or not blocked:
                     break
@@ -811,7 +827,7 @@ def run(args: argparse.Namespace) -> int:
         else:
             merged, blocked, remote_api_error, rounds, scroll_error = scrape_search(
                 args=args, start_url=start_url, proxy_pool=proxy_pool, client=client,
-                user_agent=user_agent, cookies=cookies,
+                user_agent=user_agent, cookies=cookies, stats=search_stats,
             )
         price_confirmed_pct = (sum(1 for p in merged if p.price is not None) / len(merged)) if merged else None
     except Exception:
@@ -840,6 +856,10 @@ def run(args: argparse.Namespace) -> int:
         pages_requested=args.max_scrolls, pages_completed=completed_rounds, failed_pages=failed_pages,
         blocked=blocked, remote_api_error=remote_api_error, allow_empty=args.allow_empty,
         started_at=started_at, price_confirmed_pct=price_confirmed_pct,
+        extra_meta=search_stats or None,
+        incomplete=bool(search_stats.get("search_incomplete")),
+        stop_reason=("search_incomplete" if search_stats.get("search_incomplete")
+                     else "max_results" if search_stats.get("capped_by_max_results") else None),
     )
 
 
