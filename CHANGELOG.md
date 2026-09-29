@@ -9,6 +9,34 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-29
+
+First tagged release (1.0.0 below was never tagged). **Behaviour changes
+you may notice coming from 1.0.0**, each explained in its entry below:
+- Flights now come from the `web-unified-search` XHR (`price_source:
+  search_api`); row `currency` is what the data states or `null` — never
+  the requested `--currency`.
+- `status: complete` now carries the site's arithmetic (`itineraries_
+  available`, `capped_by_max_results`); a search stopped while still
+  incomplete is `partial` (exit 6). A remote error after rows is 6, not 5.
+- A challenge marker on a run that collected rows is no longer exit 3.
+- `--solve-captcha always` is removed (it behaved as `when-blocked`); no
+  paid solve is attempted without a token-injection path.
+- `.env` is read next to the scripts, not from the current directory; an
+  explicit route beats a saved `SKYSCANNER_URL`.
+- New: `--wait-for-human`, `batch_scraper.py`, return-leg `return_*`
+  columns, dead-proxy rotation.
+
+### Fixed — 2026-09-29, the first CI run
+- The offline job installs no engine, and three engine-CLI checks asserted
+  that at least one was present — red on the first push (two of them
+  predate today; CI had simply never run). They now SKIP visibly there;
+  each `engine-smoke` job runs them with its driver.
+- The README-number check read `README.md` inside the Docker image, which
+  ships none — the §22 trap. It skips visibly when README is absent.
+- Both CI environments were reproduced locally (a driver-less venv and the
+  image's file set) before pushing the fix.
+
 ### Fixed/Added — 2026-09-29, round trips and mid-run challenges
 - **`--wait-for-human` only looked once**, right after navigation. Live, a
   PerimeterX challenge appeared AFTER the first search-API poll; the run
