@@ -75,9 +75,10 @@ Three outcomes, and what each one means:
   - **Update, 2026-09-20 — `--cdp-endpoint` was tried live and did NOT
     get past it**: a real run over a real 2Captcha Scraping Browser API
     session still got the same `px-captcha` challenge — its bundled
-    auto-solve extension did not clear it either, and 2Captcha confirmed
-    directly there is no automated task type for PerimeterX at all (see
-    `captcha_solver.py`'s module docstring for the full incident). Don't
+    auto-solve extension did not clear it either. This repo does not
+    implement a PerimeterX solve; 2Captcha's PerimeterX page (read
+    2026-09-29) says that solver is under development (see
+    `captcha_solver.py`'s module docstring). Don't
     expect `--cdp-endpoint` alone to solve this. Two things are still
     worth trying instead, neither of which is a solve:
     - `--cdp-block-retries N` (default 2) reconnects for a fresh Scraping

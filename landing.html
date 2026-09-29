@@ -177,11 +177,12 @@
       one and you can get approved. This scraper is for everything outside that.
     </div>
     <div class="callout honest">
-      <strong>Read this before you rely on it:</strong> unlike this family's other scrapers, this one was built
-      without ever being able to look at the real site — <code>skyscanner.com</code> blocks this project's own
-      automated fetch tooling at the <code>robots.txt</code> level, and that restriction was respected rather than
-      worked around. The architecture (exit codes, output schema, dedupe, all three engines) is real and tested;
-      the parsing selectors are documented best-effort guesses pending a real capture. Full details in the
+      <strong>Read this before you rely on it:</strong> the flight list arrives over Skyscanner's own
+      <code>web-unified-search</code> XHR, which all three engines capture; the parser was built against a real
+      captured response. Skyscanner is behind PerimeterX: every fully automated run so far was challenged, and what
+      returned real results (2026-09-29: 385 itineraries LHR→JFK, 1690 across three routes) was your own local
+      Chrome with a person clearing "Press &amp; Hold" once (<code>--wait-for-human</code>). This repo does not
+      implement a PerimeterX solve. Full, dated details in the
       <a href="https://github.com/2scraper/skyscanner-scraper#readme">README</a> — read it first.
     </div>
   </section>

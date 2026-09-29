@@ -21,24 +21,20 @@ calls page.evaluate / execute_script to inject the token, because that is
 exactly the kind of per-engine primitive `page_flow.py`-style code should
 own instead of a shared module quietly picking one driver's dialect.
 
-**PerimeterX (and similarly, DataDome / a bare Cloudflare managed-
-challenge interstitial) is a CONFIRMED gap, not a bug** — 2Captcha's own
-API has no task type for these at all (confirmed directly by 2Captcha,
-2026-09-20, after a real skyscanner.com PerimeterX challenge was hit live
-through a real Scraping Browser API session — the anti-detect browser's
-own bundled auto-solve extension did not clear it either). `CaptchaType`
-below therefore only lists the four widget families 2Captcha actually has
-a solve path for (Cloudflare Turnstile, reCAPTCHA v2/v3, hCaptcha) —
-`identify_unsupported_vendor()` exists so a detected-but-unsolvable block
-gets a clear, honest log line naming the real reason ("PerimeterX
-detected, no automated solve exists") instead of the misleading "no known
-widget/sitekey could be extracted", which reads like a parsing bug rather
-than a real product gap. See `playwright_scraper.py`'s `--cdp-block-
-retries` for the actual mitigation this repo takes instead of pretending
-to solve it: reconnect the Scraping Browser session (a different exit
-identity from the pool) and retry, since PerimeterX-style defenses are
-largely reputation/behavior-based and a fresh session sometimes simply
-isn't challenged at all.
+**What this module solves, and what it only names.** `CaptchaType` covers
+the widget families this repo builds 2Captcha tasks for (Turnstile,
+reCAPTCHA v2/v3, hCaptcha). `identify_unsupported_vendor()` names a
+defense this repo does NOT implement a solve for — PerimeterX, DataDome, a
+Cloudflare managed-challenge interstitial — so the log states the real
+reason instead of "no known widget/sitekey", which reads like a parser
+bug. That is a statement about this repo, not about 2Captcha (CLAUDE.md
+§19): 2Captcha documents `DataDomeSliderTask` for DataDome
+(2captcha.com/api-docs/datadome-slider-captcha, read 2026-09-29), and its
+PerimeterX page
+(2captcha.com/p/perimeterx-solver, read 2026-09-29) says that solver is
+under development / custom for large volumes. On skyscanner.com the
+challenge (captured 2026-09-17/22/29) is PerimeterX's own "Press & Hold"
+with no third-party widget on the page.
 """
 from __future__ import annotations
 
@@ -126,17 +122,11 @@ def detect_from_html(html: str, extra_markers: Sequence[str] = ()) -> bool:
     return False
 
 
-# Markers whose VENDOR is known, but for which 2Captcha has no automated
-# task type at all (confirmed for PerimeterX by 2Captcha's own team,
-# 2026-09-20 — not "we couldn't extract a sitekey", but "there is no
-# solve path here, full stop"; DataDome and a bare Cloudflare managed-
-# challenge interstitial are listed defensively alongside it since the
-# same "detected but structurally unsolvable" shape applies to them too,
-# pending explicit confirmation either way). Checked ONLY after
-# `identify_widget()` already returned None for a marker that DID match
-# `GENERIC_BOT_CHALLENGE_MARKERS`/`extra_markers` — a real Cloudflare
-# Turnstile / reCAPTCHA / hCaptcha widget is solvable and is already
-# caught by `identify_widget()` before this is ever consulted.
+# Markers whose VENDOR is known but for which THIS REPO builds no solve
+# task (see the module docstring for what 2Captcha itself documents —
+# this is a TODO list, not a claim that these cannot be solved). Checked
+# ONLY after `identify_widget()` returned None for a marker that DID match,
+# so a real Turnstile / reCAPTCHA / hCaptcha widget never lands here.
 _UNSUPPORTED_VENDOR_MARKERS = {
     "perimeterx": ("px-captcha", "perimeterx"),
     "datadome": ("datadome",),

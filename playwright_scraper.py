@@ -333,6 +333,9 @@ async def _enable_scraping_browser_auto_solve(context: BrowserContext, page: Pag
         log.warning("Captcha.setAutoSolve unavailable on this CDP session (continuing without it): %s", exc)
 
 
+_WARNED_VENDORS: set = set()
+
+
 async def _maybe_solve_captcha(
     *, html: str, url: str, client: Optional[TwoCaptchaClient], policy: str, min_score: float = 0.3,
     rows_seen: int = 0,
@@ -361,19 +364,20 @@ async def _maybe_solve_captcha(
     elif action == "detected_unidentified_widget":
         log.warning("A captcha-like marker was detected but no known widget/sitekey could be extracted.")
     elif action == "unsupported_vendor":
-        # Confirmed gap, not a bug (captcha_solver.py's module docstring) —
-        # 2Captcha has no task type for this vendor at all. Naming it here
-        # replaces the misleading "no known widget/sitekey" line with the
-        # real reason, so a caller reads this and reaches for
-        # --cdp-block-retries / --cookies-file instead of filing a parser
-        # bug report.
-        log.warning(
-            "%s challenge detected — 2Captcha has no automated solve for this "
-            "defense (confirmed gap, not a bug). Reporting run as blocked. "
-            "See --cdp-block-retries (retry with a fresh session) and "
-            "--cookies-file (reuse a session a human solved manually).",
-            result.get("vendor"),
-        )
+        # Name the vendor instead of the vague "no known widget/sitekey"
+        # line. The claim is about THIS page and THIS repo (CLAUDE.md §19),
+        # not about what 2Captcha can do. Logged once per process: this
+        # runs every scroll round.
+        vendor = result.get("vendor")
+        if vendor not in _WARNED_VENDORS:
+            _WARNED_VENDORS.add(vendor)
+            log.warning(
+                "%s challenge on the page and no widget this repo can solve (reCAPTCHA/Turnstile/"
+                "hCaptcha) was found; this repo does not implement a %s solve. Reported as blocked "
+                "only if no itineraries were collected. What has worked live: --wait-for-human over "
+                "your own local Chrome (README).",
+                vendor, vendor,
+            )
     return result
 
 

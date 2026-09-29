@@ -2,31 +2,23 @@
 """flight_parser.py — this IS the skyscanner.com site knowledge (the
 flight-family analog of stockx-scraper's product_parser.py).
 
-**Honesty note, read before trusting anything below**: stockx-scraper's
-product_parser.py was verified against real, live captures of stockx.com.
-No equivalent capture exists for skyscanner.com in this repo. WebFetch on
-skyscanner.com search URLs returns ROBOTS_DISALLOWED, and bypassing that
-restriction is not something this assistant will do — so nothing here has
-been checked against the real, current skyscanner.com markup. Every
-selector and JSON-shape guess below is marked `# TODO: verify live` and
-was carried over from (or extended from) the original draft's own honest
-"selectors unverified" disclosure. Do not point this at production
-traffic before running `--dump-html` once and confirming these still
-match — see README "What's been tested vs. what hasn't".
+**What is verified, and what is not.** The flight list arrives over the
+`web-unified-search` XHR (engines capture it; see `SearchApiCapture`).
+`parse_search_json()` / `_itinerary_node_to_product()` were built against
+a real response captured by hand in Chrome on 2026-09-29 (LHR→JFK, 373
+itineraries; trimmed copy in `fixtures/`) and matched live responses
+(385–389 itineraries) the same day. The HTML paths below are NOT verified
+— a search page's initial HTML carries no flights — and every guess there
+is marked `# TODO: verify live`.
 
-Parsing strategy, in priority order (same "embedded-JSON-first, DOM
-fallback" family principle as stockx-scraper, applied cautiously since the
-embedded-JSON shape below is a generic heuristic, not a confirmed query
-name like stockx's `getDiscoveryData`):
+Parsing order, per scroll round: captured search-API rows first
+(`combine_results`), then the HTML paths for anything they did not cover:
 
-  1. `__NEXT_DATA__` (skyscanner.com is Next.js-based per public knowledge)
-     is parsed, then walked generically for any list of dicts that LOOKS
-     like a flight-result list (keys suggesting price + legs/segments) —
-     see `_find_itinerary_lists()`. No hardcoded query name: this repo
-     doesn't know skyscanner.com's real query name the way stockx-scraper
-     knows `getDiscoveryData`.
-  2. DOM fallback: `[data-testid="result-card"]` and a handful of sibling
-     testid guesses, matching the original draft's TODO-marked selectors.
+  1. `__NEXT_DATA__`, walked generically for any list of dicts that LOOKS
+     like a flight-result list (price + legs/segments keys) — see
+     `_find_itinerary_lists()`, which the XHR path reuses.
+  2. DOM fallback: `[data-testid="result-card"]` and sibling testid
+     guesses.
 
 Both paths feed the same `Product` shape from output_writer.py.
 """

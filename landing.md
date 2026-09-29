@@ -14,13 +14,14 @@ Skyscanner offers partner/affiliate travel-search feeds for businesses that need
 
 ## Read this before you rely on it
 
-Unlike this family's other scrapers, this one was built **without ever being able to look at the real site** — `skyscanner.com` blocks this project's own automated fetch tooling at the `robots.txt` level, and that restriction was respected rather than worked around. The architecture (exit codes, output schema, dedupe, credential handling, all three engines) is real and tested. The parsing selectors are documented best-effort guesses pending a real capture. Full honesty section in the [repository README](https://github.com/2scraper/skyscanner-scraper#readme) — read it before you point this at anything that matters.
+The flight list arrives over Skyscanner's own `web-unified-search` XHR, which all three engines capture and parse; the parser was built against a real captured response. Skyscanner is behind PerimeterX: every fully automated run so far was challenged, and what returned real results (2026-09-29: 385 itineraries LHR→JFK, 1690 across three routes) was your own local Chrome with a person clearing "Press & Hold" once (`--wait-for-human`). This repo does not implement a PerimeterX solve. Full, dated details in the [repository README](https://github.com/2scraper/skyscanner-scraper#readme) — read it before you point this at anything that matters.
 
 ## What you get
 
 - Free, open-source scraper, one script per engine — **Playwright** (primary, local-first), **Selenium**, and **Puppeteer** (via pyppeteer), all producing the identical output schema and exit codes
 - Search by origin/destination/dates, with cabin class, stops and sort filters
-- Reads Skyscanner's own embedded data payload first, with a DOM fallback — same family principle as this project's sibling scrapers
+- Reads the flight list from Skyscanner's own search XHR (`web-unified-search`), with embedded-JSON and DOM fallbacks
+- `batch_scraper.py`: many routes in one run over the same cleared session, with a 2Captcha fallback
 - JSON and CSV export, with a documented `Product` schema and a `.meta.json` sidecar on every completed/partial run
 - Optional 2Captcha integration, wired in but never required to get started
 

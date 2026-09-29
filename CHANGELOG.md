@@ -9,6 +9,26 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Corrected — 2026-09-29, capability wording (template §19)
+- Earlier entries below call the PerimeterX gap "CONFIRMED PERMANENT" and
+  say 2Captcha has "no automated task type" for PerimeterX, DataDome or a
+  Cloudflare managed challenge. Those sentences are superseded. What is
+  measured: skyscanner.com's challenge page (captured 2026-09-17/22/29)
+  carries PerimeterX's own "Press & Hold" and no third-party widget; this
+  repo does not implement a PerimeterX solve; 2Captcha's PerimeterX page
+  (2captcha.com/p/perimeterx-solver, read 2026-09-29) says that solver "is
+  currently unavailable or under development", with custom solutions for
+  large volumes. 2Captcha documents `DataDomeSliderTask` for DataDome
+  (api-docs/datadome-slider-captcha, read 2026-09-29); this repo does not
+  implement it. README, landing, TESTING, SECURITY, module docstrings and
+  the engines' log line now say "this repo does not implement", not
+  "cannot be solved". The historical entries are left as written.
+- README's trust section is now a dated summary of what is measured, not a
+  stack of "Update" paragraphs that contradicted each other ("built without
+  ever looking at the site" next to "385 itineraries live").
+- The engines' vendor warning is logged once per process instead of every
+  scroll round.
+
 ### Fixed — 2026-09-29, template audit: status, currency, blocks and paid solves
 - **"complete" said nothing about how much.** The sidecar now carries the
   site's own arithmetic: `results_source`, `search_api_status`,

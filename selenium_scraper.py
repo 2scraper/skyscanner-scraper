@@ -19,9 +19,8 @@ the family CLAUDE.md §6, referenced there):
     to Chrome, and this engine WARNS rather than silently dropping them.
 
 **PerimeterX gap and its mitigations** (see captcha_solver.py's module
-docstring for the full incident): 2Captcha has no automated solve for
-PerimeterX/DataDome/a bare Cloudflare managed challenge at all, confirmed
-live against a real skyscanner.com challenge. `--cdp-block-retries` and
+docstring): this repo does not implement a solve for PerimeterX (what
+skyscanner.com serves) or DataDome / a Cloudflare managed challenge. `--cdp-block-retries` and
 `--cookies-file` exist here for CLI/flag parity with playwright_scraper.py
 and puppeteer_scraper.py (CLAUDE.md §4), but `--cdp-block-retries` is
 weaker on this engine specifically: Selenium's `debugger_address` attaches
@@ -392,6 +391,9 @@ _STATUS_JS = (
 )
 
 
+_WARNED_VENDORS: set = set()
+
+
 def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptchaClient], policy: str, min_score: float = 0.3, rows_seen: int = 0) -> Optional[dict]:
     if policy == "off" or client is None:
         return None
@@ -418,15 +420,20 @@ def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptchaClie
     elif action == "detected_unidentified_widget":
         log.warning("A captcha-like marker was detected but no known widget/sitekey could be extracted.")
     elif action == "unsupported_vendor":
-        # Confirmed gap, not a bug (captcha_solver.py's module docstring) —
-        # 2Captcha has no task type for this vendor at all.
-        log.warning(
-            "%s challenge detected — 2Captcha has no automated solve for this "
-            "defense (confirmed gap, not a bug). Reporting run as blocked. "
-            "See --cdp-block-retries and --cookies-file (this module's "
-            "docstring has the Selenium-specific caveat on the former).",
-            result.get("vendor"),
-        )
+        # Name the vendor instead of the vague "no known widget/sitekey"
+        # line. The claim is about THIS page and THIS repo (CLAUDE.md §19),
+        # not about what 2Captcha can do. Logged once per process: this
+        # runs every scroll round.
+        vendor = result.get("vendor")
+        if vendor not in _WARNED_VENDORS:
+            _WARNED_VENDORS.add(vendor)
+            log.warning(
+                "%s challenge on the page and no widget this repo can solve (reCAPTCHA/Turnstile/"
+                "hCaptcha) was found; this repo does not implement a %s solve. Reported as blocked "
+                "only if no itineraries were collected. What has worked live: --wait-for-human over "
+                "your own local Chrome (README).",
+                vendor, vendor,
+            )
     return result
 
 

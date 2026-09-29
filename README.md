@@ -17,142 +17,46 @@ family — same output contract, exit codes, and family modules as
 
 ## Read this before trusting a run
 
-Unlike this family's other repos, **this one was built without ever being
-able to look at the real site.** `WebFetch` on skyscanner.com's search
-pages returns `ROBOTS_DISALLOWED`, and that restriction was not worked
-around to build this — no `curl`, no bypass, nothing. That means:
+What is measured, as of 2026-09-29. The dated investigation that got here
+(2026-09-17 → 2026-09-29) is in `CHANGELOG.md`.
 
-- **Live-verified 2026-09-29:** with `--wait-for-human` over your own
-  local Chrome (`--cdp-endpoint http://127.0.0.1:9222`), a person holds
-  the PerimeterX button once; later runs in that same Chrome profile got
-  no challenge and returned the full result set (385/385 itineraries for
-  LHR→JFK in ~10s). Fully automated runs still stop at PerimeterX.
-- **Update 2026-09-29:** the flight list actually arrives over the
-  `web-unified-search` XHR, not in the HTML. A real response body
-  (captured by hand in Chrome, LHR→JFK, 373 itineraries) is now the
-  parser's verified source: all 373 rows parse with price, currency,
-  airline, times, stops and deeplink (`fixtures/` holds a trimmed copy).
-  All three engines capture that XHR and parse it before the HTML. What
-  is still unverified: the engines' capture against the live site, since
-  every live run so far stops at PerimeterX before the XHR fires.
-- `flight_parser.py`'s CSS selectors and `__NEXT_DATA__` heuristics are
-  **best-effort guesses**, each marked `# TODO: verify live` in that
-  file, not confirmed site knowledge the way stockx-scraper's
-  `product_parser.py` is (that one *was* built from real, live captures).
-- **Everything else — the architecture — is real and tested**: exit
-  codes, the output contract, dedupe, credential redaction, CLI
-  validation, all three engines importing cleanly, the crash-safety
-  wrapper around parsing. `smoke_test.py` proves all of that against
-  SYNTHETIC fixtures (see its own module docstring).
-- The gap between those two facts is exactly what `TESTING.md` step 2 and
-  the `canary-local` CI job (which runs with **no secrets**, on a
-  schedule, against the real site) exist to close. If you run this and
-  get zero itineraries back, that is the **expected first-run outcome**
-  for a parser nobody has pointed at the real markup yet — not evidence
-  the scraper doesn't work. Open the `--dump-html` capture, compare it to
-  `flight_parser.py`, fix what doesn't match, and you've turned a guess
-  into this repo's first actually-verified fact.
-- **Update, 2026-09-17 — the first real fact, and it's about detection,
-  not the parser**: a plain local-first run (no proxy, no fingerprint)
-  got served a PerimeterX "Are you a person or a robot?" challenge page
-  instead of search results — exit `3` (blocked), exactly as designed.
-  `flight_parser.BOT_CHALLENGE_MARKERS` now has two real, captured
-  markers from that incident (see its docstring), on top of the generic
-  detector that already caught it. The parser's own selectors are still
-  unverified — a block page isn't a results page — see `TESTING.md`
-  step 2 for how to try to get past the challenge (`--fingerprint` / a
-  residential proxy / `--cdp-endpoint`) and capture a genuine one.
-- **Update, 2026-09-20 — the PerimeterX gap is now CONFIRMED PERMANENT,
-  not just unsolved-so-far**: a real run against the real site, over a
-  real 2Captcha Scraping Browser API session (`--cdp-endpoint`), still
-  got served the same PerimeterX challenge — the Scraping Browser's own
-  bundled auto-solve extension did not clear it either. 2Captcha
-  confirmed directly: **there is no automated task type for PerimeterX at
-  all** (nor for DataDome or a bare Cloudflare managed-challenge
-  interstitial, which get the same honest treatment defensively). This
-  repo will never pretend to solve it. What it does instead — three
-  mitigations, all non-bypass:
-  1. **Honest error naming.** `captcha_solver.identify_unsupported_
-     vendor()` names the real vendor in the log instead of the old, vague
-     "no known widget/sitekey could be extracted" (which read like a
-     parser bug, not a real product gap).
-  2. **`--cdp-block-retries`** (Playwright/Puppeteer only — see
-     "Engines" for Selenium's caveat): on a blocked `--cdp-endpoint` run,
-     reconnect for a fresh Scraping Browser session and retry, since
-     PerimeterX-style defenses are largely reputation/behavior-based and
-     a fresh-enough session sometimes simply isn't challenged at all.
-  3. **`--cookies-file`**: load cookies from a session a HUMAN solved
-     manually in a real browser once. This is reuse, never an automated
-     solve — the scraper never attempts to clear the challenge itself.
-- **Update, 2026-09-21 — `--cdp-block-retries` exercised live, for real,
-  against the real site**: a full run (`--origin LHR --destination JFK`)
-  over a real Scraping Browser session exhausted all three attempts
-  (initial connection plus both retries) — each retry correctly
-  reconnected for a fresh session (a different exit identity from the
-  pool, confirmed in the log), and each fresh session was challenged by
-  PerimeterX just as fast as the last. Exit `3`, no `.meta.json` sidecar
-  (correct — a blocked run never gets one, see "The output contract").
-  The retry *mechanism* works exactly as designed; it just didn't clear
-  the block this time, which is the honest, expected outcome for a
-  reputation/behavior-based defense that isn't purely session-freshness
-  triggered — "sometimes simply isn't challenged" was always a hedge, not
-  a promise, and this run is the data point that keeps it a hedge rather
-  than quietly becoming an unearned claim of success.
-- **Update, 2026-09-22 — `--cookies-file` tried live for the first time,
-  and does NOT clear PerimeterX on its own, even from the exact IP that
-  solved it.** Roman solved the real "Press & Hold" challenge himself,
-  exported all 13 resulting cookies, and ran this repo with
-  `--cookies-file`. Challenged immediately over `--cdp-endpoint` (a
-  different exit IP/device than the cookies came from, so not
-  conclusive) — but ALSO challenged with `--proxy`/`--cdp-endpoint` both
-  disabled, a plain local browser on Roman's own real IP, the same
-  network the cookies were solved on. Most likely explanation: PerimeterX
-  cookies are refreshed continuously by its own JS sensor inside a real,
-  ongoing session, and/or its device fingerprint (Playwright's own
-  automation tells, e.g. `navigator.webdriver`) is enough on its own to
-  re-challenge regardless of which cookies are attached — a static
-  snapshot replayed into a different browser process isn't the same
-  "device" the cookies were issued to, even at the same IP. Not yet
-  tried: a stealth-patched browser combined with `--cookies-file`. Until
-  that's tried, the PerimeterX gap stays exactly as CONFIRMED PERMANENT
-  as before — this test confirms `--cookies-file` alone isn't the missing
-  piece, rather than leaving it merely untested. See `CHANGELOG.md` for
-  the full write-up, including a real crash this same test exposed and
-  fixed (`page.content()` racing PerimeterX's own self-reloading
-  challenge page — now degrades gracefully instead of taking the whole
-  run down).
-
-- **Update, 2026-09-22 — `--stealth` added (all three engines), not yet
-  live-tested.** The one variable the test above didn't isolate: the
-  browser's own automation fingerprint, independent of which cookies are
-  attached. `--stealth` (off by default) patches `navigator.webdriver`,
-  `window.chrome.runtime`, `navigator.plugins`/`languages`, the
-  `permissions.query('notifications')` mismatch, and WebGL vendor/renderer
-  strings, before any page loads — the same category of change as
-  `puppeteer-extra-plugin-stealth`, explicitly not a captcha solver or
-  bypass. Combine with `--cookies-file` and test live before drawing any
-  conclusion; until that live test happens, the PerimeterX gap stays
-  CONFIRMED PERMANENT exactly as stated above — this entry records what
-  was tried, not a result. See `CHANGELOG.md` for the full write-up.
-
-- **Update, 2026-09-22 — `--scraper-api` added and live-tested (all three
-  engines): a genuinely different failure shape, still not a bypass.**
-  2Captcha's Scraper API (a browserless fetch run entirely on their own
-  infrastructure — see `scraper_api_client.py`'s module docstring) never
-  showed a single PerimeterX marker in live testing, but the flight-search
-  route still never came back usable: sometimes a bare ~700-byte
-  un-hydrated app shell, sometimes a real SEO-prerendered page (in a
-  non-English locale, no way to pin it) with zero client-rendered result
-  cards — skyscanner.com's actual flight data loads via client-side JS/XHR
-  calls after the initial page, which a one-shot static fetch never
-  triggers. The homepage, by contrast, fetches completely fine. Also
-  fixed in passing: this repo's own `.env` `TWOCAPTCHA_KEY` was invalid
-  (`ERROR_KEY_DOES_NOT_EXIST`) and has been replaced with a working key —
-  worth double-checking it's the one you intend. Full write-up, including
-  both observed response shapes, in `CHANGELOG.md`. **The PerimeterX gap
-  stays CONFIRMED PERMANENT** — five mitigations tried now (`--cdp-
-  endpoint`, `--cookies-file`, `--stealth`, `--scraper-api`, and their
-  combinations), none has produced real itinerary data yet.
+- **Where the data comes from.** A search page's initial HTML carries no
+  flights. The page fetches them from the `web-unified-search` XHR and
+  re-polls it while its `context.status` is `incomplete`. All three
+  engines capture that XHR and parse it first (`price_source:
+  search_api`). The parser was built against a real response captured by
+  hand in Chrome (LHR→JFK, 373 itineraries; a trimmed copy is in
+  `fixtures/`). The `__NEXT_DATA__` and DOM paths are unverified fallbacks
+  (`# TODO: verify live` in `flight_parser.py`).
+- **What works live.** Playwright over your own local Chrome
+  (`--cdp-endpoint http://127.0.0.1:9222`) with `--wait-for-human`. A
+  person held PerimeterX's "Press & Hold" once (~10 s); runs in that same
+  Chrome profile over the next ~2.5 hours were not challenged and returned
+  the full result set: 385–389 itineraries for LHR→JFK in ~10 s, and 1690
+  across three routes through `batch_scraper.py`. That is one session;
+  how long a cleared session stays unchallenged is not measured beyond it.
+  pyppeteer and Selenium are verified on a local stand, not live.
+- **What has not worked live.** Every fully automated attempt so far was
+  challenged by PerimeterX: local Chromium (plain, and with
+  `--fingerprint`); the Scraping Browser API over `--cdp-endpoint`
+  (`Captcha.setAutoSolve` on, fresh sessions via `--cdp-block-retries`);
+  `--cookies-file` replaying a human-cleared session into another browser.
+  `--scraper-api` returned pages without flights, because it cannot see the
+  XHR. `--stealth` has not been live-tested.
+- **What a captcha solver can and cannot do here — the narrow version.**
+  Skyscanner's challenge page (captured 2026-09-17, -22 and -29) carries
+  PerimeterX's own "Press & Hold" and no third-party widget: no reCAPTCHA,
+  Turnstile or hCaptcha sitekey, so there is nothing for a token-based
+  task on that page. 2Captcha's PerimeterX page
+  (`2captcha.com/p/perimeterx-solver`, read 2026-09-29) says that solver
+  "is currently unavailable or under development" and offers custom
+  solutions for large volumes. **This repo does not implement a PerimeterX
+  solve** — a TODO if one becomes available, not a property of the site.
+- **The rest is tested offline**: exit codes, the output contract, dedupe,
+  credential redaction, CLI validation, the XHR capture, `--wait-for-human`
+  and re-opening the search after a challenge (all three engines, on a
+  local stand). `smoke_test.py` uses the real fixture where it exists and
+  says so where a fixture is synthetic.
 
 ## Local-first
 
@@ -160,10 +64,9 @@ Like stockx-scraper, this does **not** require 2Captcha's paid Scraping
 Browser API to run. The default is an ordinary local headless Chromium,
 no proxy, no key, no account. `--proxy` / `--cdp-endpoint` / `--fingerprint`
 are opt-in power options for volume, a specific exit country, or a
-consistent device identity — the same reasoning stockx-scraper's own
-README states, carried over here as an architectural choice even though
-(see above) it hasn't been live-measured on *this* site yet the way it was
-on that one.
+consistent device identity. On this site, measured 2026-09-29, none of them
+got past PerimeterX on its own; what returned real results was your own
+local Chrome plus a person clearing the challenge once (see above).
 
 ## Install
 
@@ -448,22 +351,20 @@ site):
 
 ## Known limitations
 
-- **Nothing in `flight_parser.py` has been checked against a live
-  response** — see "Read this before trusting a run" above. This is the
-  single biggest difference from stockx-scraper and the reason this
-  section leads with it instead of burying it.
-- **No site-specific block-page marker exists.** `flight_parser.
-  BOT_CHALLENGE_MARKERS` is deliberately empty — detection still runs via
-  `captcha_solver.GENERIC_BOT_CHALLENGE_MARKERS` (Cloudflare/reCAPTCHA/
-  hCaptcha/PerimeterX/DataDome wording), but nothing specific to how
-  skyscanner.com's own block page reads has been captured yet. If you hit
-  one, `TESTING.md` step 2 explains how to add it, the same way each of
-  stockx-scraper's three marker tuples was added after a real captured
-  incident.
-- **Captcha token injection on a locally-launched browser is not
-  implemented**, for the same reason as stockx-scraper: injecting a
-  solved token is widget/site-specific, and no real challenge from this
-  site was ever available to verify an injector against. Over
+- **Round trips carry the outbound leg only.** A row's `departure_time` /
+  `arrival_time` / `duration` / `stops` describe the first leg; the return
+  leg is in the XHR but not in the output schema yet.
+- **Only the XHR path is verified.** The `__NEXT_DATA__` and DOM fallbacks
+  in `flight_parser.py` are guesses marked `# TODO: verify live`.
+- **Site-specific block marker: one, measured.** `flight_parser.
+  BOT_CHALLENGE_MARKERS` is `("/sttc/px/captcha-v2/",)` — present on every
+  captured challenge page, absent from a captured normal page.
+  `px-cloud.net` was removed on 2026-09-29 because PerimeterX's background
+  sensor loads it on normal pages too.
+- **This repo does not implement captcha token injection**, so engines
+  never pay for a solve (`allow_paid_solve=False`): a recognised widget is
+  logged as `solve_not_attempted`. No reCAPTCHA/Turnstile/hCaptcha widget
+  has been observed on this site to build an injector against. Over
   `--cdp-endpoint` (the Scraping Browser API), this doesn't matter —
   2Captcha's own `Captcha.setAutoSolve` CDP domain handles it entirely
   inside their infrastructure (wired up in `playwright_scraper.py` /

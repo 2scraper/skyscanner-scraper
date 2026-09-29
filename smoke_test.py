@@ -4,19 +4,15 @@ fixture checks. No pytest, no conftest. `tests/test_smoke.py` wraps this as
 a single pytest entry point so `pytest` also works, without a second copy
 of the checks.
 
-**Honesty note, read before trusting a green run**: unlike stockx-scraper's
-smoke_test.py, none of the HTML fixtures here are real captures of
-skyscanner.com — none exist (see flight_parser.py's module docstring: this
-site is robots.txt-restricted to WebFetch, and that restriction was not
-bypassed). Every fixture below is SYNTHETIC — hand-written to exercise the
-parsing code paths, not measured against a live response. A green run
-here proves the architecture (exit codes, dedupe, precedence, credential
-redaction, CLI validation, engines importing cleanly) is sound, and that
-the parser's OWN LOGIC does what it says on markup shaped the way the
-draft/this repo GUESSED skyscanner.com looks. It does NOT prove
-flight_parser.py's selectors or JSON-shape heuristics match the real,
-current site — that still needs a live `--dump-html` capture, same as
-README "What's been tested vs. what hasn't" says.
+**What a green run proves.** The architecture (exit codes, dedupe,
+precedence, credential redaction, CLI validation, engines importing
+cleanly, the Dockerfile's COPY list) and the parser against ONE real,
+trimmed capture of the `web-unified-search` XHR
+(`fixtures/web_unified_search_lhr_jfk_trimmed.json`, LHR→JFK, 2026-09-29).
+The `__NEXT_DATA__`/DOM fixtures below are SYNTHETIC (hand-written; those
+paths are unverified against the live site), and so are the challenge-page
+fragments, which copy the shape of real captures. A green run does not
+prove the live site still answers the way that capture did.
 
 Run directly: `python3 smoke_test.py`
 """

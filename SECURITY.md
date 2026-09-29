@@ -3,8 +3,8 @@
 ## Supported versions
 
 Only the latest commit on `main` and the most recently tagged release get
-security fixes. This project is pre-1.0 (see `CHANGELOG.md`) — older tags
-are not backported.
+security fixes. Only the latest release gets security fixes (see `CHANGELOG.md`); older
+tags are not backported.
 
 ## Reporting a vulnerability
 
@@ -27,8 +27,8 @@ run that silently dropped data would count, for example).
 **Out of scope**: vulnerabilities in skyscanner.com itself, or in a booking
 partner a search result deep-links to — report those to Skyscanner or that
 partner directly, not here. The PerimeterX bot challenge this tool
-documents hitting is a known, confirmed-permanent limitation of the target
-site (see README/CHANGELOG), not a vulnerability in this repo.
+documents hitting is the target site's own bot defense (see README), not a
+vulnerability in this repo.
 
 ## What this tool does with credentials
 
