@@ -21,10 +21,11 @@ rather than being a silent violation of that.
   incomplete.
 - `--dump-html` also writes the last captured body to
   `<out>_search_api_debug.json` (gitignored: it carries session tokens).
-- Verified end-to-end for Playwright on a local stand that polls the real
-  fixture twice (incomplete → complete, price refreshed). pyppeteer and
-  Selenium are not installed here: covered by compile + a fake-driver
-  smoke check only. Not yet seen against the live site (PerimeterX).
+- Verified end-to-end for all three engines (Playwright, pyppeteer 2.0.0
+  and Selenium 4.49 on system Chrome, each in its own venv) on a local
+  stand that polls the real fixture twice: both polls captured, 3 rows,
+  price refreshed from the second poll, exit 0. Not yet seen against the
+  live site (every live run so far stops at PerimeterX first).
 - `--scraper-api` returns HTML only and cannot see the XHR.
 
 ### Fixed — 2026-09-29, parser verified against the first REAL skyscanner capture
