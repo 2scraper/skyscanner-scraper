@@ -230,6 +230,29 @@ def _num(node: Any, *path: str) -> Optional[float]:
     return None
 
 
+def _leg_fields(leg: dict) -> tuple:
+    """(airline, departure, arrival, duration, stops label) of one leg.
+    Real shape (2026-09-29): `carriers` is {"marketing": [{"name": ...}]},
+    times are local ISO strings, `durationInMinutes`, `stopCount`."""
+    carriers = leg.get("carriers")
+    if isinstance(carriers, dict):
+        carriers = carriers.get("marketing")
+    carriers = carriers if isinstance(carriers, list) else None
+    airline = carriers[0].get("name") if carriers and isinstance(carriers[0], dict) else None
+    departure = leg.get("departure") or leg.get("departureTime")
+    arrival = leg.get("arrival") or leg.get("arrivalTime")
+    duration = leg.get("durationInMinutes") or leg.get("duration")
+    if isinstance(duration, (int, float)):
+        duration = f"{int(duration) // 60}h {int(duration) % 60}m"
+    stop_count = leg.get("stopCount")
+    stops = (
+        "Direct" if stop_count == 0
+        else f"{stop_count} stop{'s' if stop_count != 1 else ''}" if isinstance(stop_count, int)
+        else None
+    )
+    return airline, departure, arrival, duration, stops
+
+
 def _itinerary_node_to_product(
     node: dict, *, origin: str, destination: str, depart_date: str,
     return_date: Optional[str], adults: int, cabin_class: str,
@@ -255,29 +278,12 @@ def _itinerary_node_to_product(
 
     legs = node.get("legs") if isinstance(node.get("legs"), list) else []
     leg0 = legs[0] if legs and isinstance(legs[0], dict) else {}
-    carriers = leg0.get("carriers")
-    if isinstance(carriers, dict):
-        # Real shape: {"marketing": [{"name": "jetBlue", ...}], "operationType": ...}
-        carriers = carriers.get("marketing")
-    carriers = carriers if isinstance(carriers, list) else None
-    airline = None
-    if carriers and isinstance(carriers[0], dict):
-        airline = carriers[0].get("name")
-    elif isinstance(node.get("carriers"), list) and node["carriers"]:
+    airline, departure_time, arrival_time, duration, stops_label = _leg_fields(leg0)
+    if airline is None and isinstance(node.get("carriers"), list) and node["carriers"]:
         c0 = node["carriers"][0]
         airline = c0.get("name") if isinstance(c0, dict) else None
-
-    departure_time = leg0.get("departure") or leg0.get("departureTime")
-    arrival_time = leg0.get("arrival") or leg0.get("arrivalTime")
-    duration = leg0.get("durationInMinutes") or leg0.get("duration")
-    if isinstance(duration, (int, float)):
-        duration = f"{int(duration) // 60}h {int(duration) % 60}m"
-    stop_count = leg0.get("stopCount")
-    stops_label = (
-        "Direct" if stop_count == 0
-        else f"{stop_count} stop{'s' if stop_count != 1 else ''}" if isinstance(stop_count, int)
-        else None
-    )
+    leg1 = legs[1] if len(legs) > 1 and isinstance(legs[1], dict) else None
+    ret = _leg_fields(leg1) if leg1 else (None,) * 5
 
     deep_link = node.get("deeplink") or node.get("deepLink") or node.get("bookingUrl")
     if not deep_link:
@@ -332,6 +338,11 @@ def _itinerary_node_to_product(
         arrival_time=arrival_time,
         duration=duration,
         sort=sort,
+        return_airline=ret[0],
+        return_departure_time=ret[1],
+        return_arrival_time=ret[2],
+        return_duration=ret[3],
+        return_stops=ret[4],
     )
 
 

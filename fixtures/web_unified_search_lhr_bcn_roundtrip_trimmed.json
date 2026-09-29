@@ -1,0 +1,498 @@
+{
+ "_note": "Trimmed REAL web-unified-search XHR body, LHR->BCN 2026-12-01 return 2026-12-08, captured by the playwright engine over local Chrome 2026-09-29 (--dump-html). 2 of 10 results kept (search was still incomplete). Tokens and deeplink query strings stripped.",
+ "itineraries": {
+  "results": [
+   {
+    "id": "13554-2612010955--31685-0-9772-2612011310|9772-2612081845--31685-0-13554-2612082005",
+    "price": {
+     "raw": 83.0,
+     "formatted": "$83",
+     "pricingOptionId": "nPQXXtjVZIdg"
+    },
+    "legs": [
+     {
+      "id": "13554-2612010955--31685-0-9772-2612011310",
+      "origin": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "Лондон Хитроу",
+       "displayCode": "LHR",
+       "city": "Лондон",
+       "country": "Великобритания",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "BCN",
+       "entityId": "95565085",
+       "name": "Барселона",
+       "displayCode": "BCN",
+       "city": "Барселона",
+       "country": "Испания",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 135,
+      "stopCount": 0,
+      "isSmallestStops": false,
+      "departure": "2026-12-01T09:55:00",
+      "arrival": "2026-12-01T13:10:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -31685,
+         "alternateId": "07",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/07.png",
+         "name": "Vueling Airlines"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "13554-9772-2612010955-2612011310--31685",
+        "origin": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "Лондон",
+          "type": "City"
+         },
+         "name": "Лондон Хитроу",
+         "type": "Airport",
+         "country": "Великобритания",
+         "countryId": "UK"
+        },
+        "destination": {
+         "entityId": "95565085",
+         "flightPlaceId": "BCN",
+         "displayCode": "BCN",
+         "parent": {
+          "entityId": "27548283",
+          "flightPlaceId": "BARC",
+          "displayCode": "BCN",
+          "name": "Барселона",
+          "type": "City"
+         },
+         "name": "Барселона",
+         "type": "Airport",
+         "country": "Испания",
+         "countryId": "ES"
+        },
+        "departure": "2026-12-01T09:55:00",
+        "arrival": "2026-12-01T13:10:00",
+        "durationInMinutes": 135,
+        "flightNumber": "7641",
+        "marketingCarrier": {
+         "id": -31685,
+         "name": "Vueling Airlines",
+         "alternateId": "07",
+         "allianceId": 0,
+         "displayCode": "VY"
+        },
+        "operatingCarrier": {
+         "id": -31685,
+         "name": "Vueling Airlines",
+         "alternateId": "07",
+         "allianceId": 0,
+         "displayCode": "VY"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     },
+     {
+      "id": "9772-2612081845--31685-0-13554-2612082005",
+      "origin": {
+       "id": "BCN",
+       "entityId": "95565085",
+       "name": "Барселона",
+       "displayCode": "BCN",
+       "city": "Барселона",
+       "country": "Испания",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "Лондон Хитроу",
+       "displayCode": "LHR",
+       "city": "Лондон",
+       "country": "Великобритания",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 140,
+      "stopCount": 0,
+      "isSmallestStops": false,
+      "departure": "2026-12-08T18:45:00",
+      "arrival": "2026-12-08T20:05:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -31685,
+         "alternateId": "07",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/07.png",
+         "name": "Vueling Airlines"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "9772-13554-2612081845-2612082005--31685",
+        "origin": {
+         "entityId": "95565085",
+         "flightPlaceId": "BCN",
+         "displayCode": "BCN",
+         "parent": {
+          "entityId": "27548283",
+          "flightPlaceId": "BARC",
+          "displayCode": "BCN",
+          "name": "Барселона",
+          "type": "City"
+         },
+         "name": "Барселона",
+         "type": "Airport",
+         "country": "Испания",
+         "countryId": "ES"
+        },
+        "destination": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "Лондон",
+          "type": "City"
+         },
+         "name": "Лондон Хитроу",
+         "type": "Airport",
+         "country": "Великобритания",
+         "countryId": "UK"
+        },
+        "departure": "2026-12-08T18:45:00",
+        "arrival": "2026-12-08T20:05:00",
+        "durationInMinutes": 140,
+        "flightNumber": "7642",
+        "marketingCarrier": {
+         "id": -31685,
+         "name": "Vueling Airlines",
+         "alternateId": "07",
+         "allianceId": 0,
+         "displayCode": "VY"
+        },
+        "operatingCarrier": {
+         "id": -31685,
+         "name": "Vueling Airlines",
+         "alternateId": "07",
+         "allianceId": 0,
+         "displayCode": "VY"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     }
+    ],
+    "isSelfTransfer": false,
+    "isProtectedSelfTransfer": false,
+    "farePolicy": {
+     "isChangeAllowed": false,
+     "isPartiallyChangeable": false,
+     "isCancellationAllowed": false,
+     "isPartiallyRefundable": false
+    },
+    "fareAttributes": {},
+    "tags": [
+     "cheapest",
+     "third_shortest"
+    ],
+    "isMashUp": false,
+    "hasFlexibleOptions": false,
+    "score": 0.999,
+    "pricingOptions": [
+     {
+      "agentIds": [
+       "skyp"
+      ],
+      "price": {
+       "updateStatus": "pending",
+       "amount": 83.0
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "pending",
+         "amount": 83.0
+        },
+        "segmentIds": [
+         "13554-9772-2612010955-2612011310--31685",
+         "9772-13554-2612081845-2612082005--31685"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "skyp",
+        "url": "/transport_deeplink/4.0/KZ/ru-RU/USD/skyp/2/13554.9772.2026-12-01,9772.13554.2026-12-08/air/trava/flights"
+       }
+      ],
+      "pricingOptionId": "nPQXXtjVZIdg",
+      "fareAttributes": {}
+     }
+    ]
+   },
+   {
+    "id": "13554-2612010720--32480-0-9772-2612011030|9772-2612081700--32480-0-13554-2612081820",
+    "price": {
+     "raw": 135.08,
+     "formatted": "$136",
+     "pricingOptionId": "ijYIWoiw4Crw"
+    },
+    "legs": [
+     {
+      "id": "13554-2612010720--32480-0-9772-2612011030",
+      "origin": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "Лондон Хитроу",
+       "displayCode": "LHR",
+       "city": "Лондон",
+       "country": "Великобритания",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "BCN",
+       "entityId": "95565085",
+       "name": "Барселона",
+       "displayCode": "BCN",
+       "city": "Барселона",
+       "country": "Испания",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 130,
+      "stopCount": 0,
+      "isSmallestStops": false,
+      "departure": "2026-12-01T07:20:00",
+      "arrival": "2026-12-01T10:30:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -32480,
+         "alternateId": "BA",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/BA.png",
+         "name": "British Airways"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "13554-9772-2612010720-2612011030--32480",
+        "origin": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "Лондон",
+          "type": "City"
+         },
+         "name": "Лондон Хитроу",
+         "type": "Airport",
+         "country": "Великобритания",
+         "countryId": "UK"
+        },
+        "destination": {
+         "entityId": "95565085",
+         "flightPlaceId": "BCN",
+         "displayCode": "BCN",
+         "parent": {
+          "entityId": "27548283",
+          "flightPlaceId": "BARC",
+          "displayCode": "BCN",
+          "name": "Барселона",
+          "type": "City"
+         },
+         "name": "Барселона",
+         "type": "Airport",
+         "country": "Испания",
+         "countryId": "ES"
+        },
+        "departure": "2026-12-01T07:20:00",
+        "arrival": "2026-12-01T10:30:00",
+        "durationInMinutes": 130,
+        "flightNumber": "474",
+        "marketingCarrier": {
+         "id": -32480,
+         "name": "British Airways",
+         "alternateId": "BA",
+         "allianceId": -32000,
+         "displayCode": "BA"
+        },
+        "operatingCarrier": {
+         "id": -32480,
+         "name": "British Airways",
+         "alternateId": "BA",
+         "allianceId": -32000,
+         "displayCode": "BA"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     },
+     {
+      "id": "9772-2612081700--32480-0-13554-2612081820",
+      "origin": {
+       "id": "BCN",
+       "entityId": "95565085",
+       "name": "Барселона",
+       "displayCode": "BCN",
+       "city": "Барселона",
+       "country": "Испания",
+       "isHighlighted": false
+      },
+      "destination": {
+       "id": "LHR",
+       "entityId": "95565050",
+       "name": "Лондон Хитроу",
+       "displayCode": "LHR",
+       "city": "Лондон",
+       "country": "Великобритания",
+       "isHighlighted": false
+      },
+      "durationInMinutes": 140,
+      "stopCount": 0,
+      "isSmallestStops": false,
+      "departure": "2026-12-08T17:00:00",
+      "arrival": "2026-12-08T18:20:00",
+      "timeDeltaInDays": 0,
+      "carriers": {
+       "marketing": [
+        {
+         "id": -32480,
+         "alternateId": "BA",
+         "logoUrl": "https://logos.skyscnr.com/images/airlines/favicon/BA.png",
+         "name": "British Airways"
+        }
+       ],
+       "operationType": "fully_operated"
+      },
+      "segments": [
+       {
+        "id": "9772-13554-2612081700-2612081820--32480",
+        "origin": {
+         "entityId": "95565085",
+         "flightPlaceId": "BCN",
+         "displayCode": "BCN",
+         "parent": {
+          "entityId": "27548283",
+          "flightPlaceId": "BARC",
+          "displayCode": "BCN",
+          "name": "Барселона",
+          "type": "City"
+         },
+         "name": "Барселона",
+         "type": "Airport",
+         "country": "Испания",
+         "countryId": "ES"
+        },
+        "destination": {
+         "entityId": "95565050",
+         "flightPlaceId": "LHR",
+         "displayCode": "LHR",
+         "parent": {
+          "entityId": "27544008",
+          "flightPlaceId": "LOND",
+          "displayCode": "LON",
+          "name": "Лондон",
+          "type": "City"
+         },
+         "name": "Лондон Хитроу",
+         "type": "Airport",
+         "country": "Великобритания",
+         "countryId": "UK"
+        },
+        "departure": "2026-12-08T17:00:00",
+        "arrival": "2026-12-08T18:20:00",
+        "durationInMinutes": 140,
+        "flightNumber": "485",
+        "marketingCarrier": {
+         "id": -32480,
+         "name": "British Airways",
+         "alternateId": "BA",
+         "allianceId": -32000,
+         "displayCode": "BA"
+        },
+        "operatingCarrier": {
+         "id": -32480,
+         "name": "British Airways",
+         "alternateId": "BA",
+         "allianceId": -32000,
+         "displayCode": "BA"
+        },
+        "transport": {
+         "mode": "TRANSPORT_MODE_FLIGHT"
+        }
+       }
+      ]
+     }
+    ],
+    "isSelfTransfer": false,
+    "isProtectedSelfTransfer": false,
+    "farePolicy": {
+     "isChangeAllowed": false,
+     "isPartiallyChangeable": false,
+     "isCancellationAllowed": false,
+     "isPartiallyRefundable": false
+    },
+    "fareAttributes": {},
+    "tags": [
+     "second_shortest"
+    ],
+    "isMashUp": false,
+    "hasFlexibleOptions": false,
+    "score": 0.738519,
+    "pricingOptions": [
+     {
+      "agentIds": [
+       "ba__"
+      ],
+      "price": {
+       "updateStatus": "current",
+       "amount": 135.08
+      },
+      "items": [
+       {
+        "price": {
+         "updateStatus": "current",
+         "amount": 135.08
+        },
+        "segmentIds": [
+         "13554-9772-2612010720-2612011030--32480",
+         "9772-13554-2612081700-2612081820--32480"
+        ],
+        "bookingProposition": "PBOOK",
+        "agentId": "ba__",
+        "url": "/transport_deeplink/4.0/KZ/ru-RU/USD/ba__/2/13554.9772.2026-12-01,9772.13554.2026-12-08/air/airli/flights"
+       }
+      ],
+      "pricingOptionId": "ijYIWoiw4Crw",
+      "fareAttributes": {}
+     }
+    ]
+   }
+  ]
+ }
+}

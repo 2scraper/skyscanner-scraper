@@ -154,9 +154,11 @@ python3 playwright_scraper.py --origin LHR --destination JFK --depart-date 2026-
   --cdp-endpoint http://127.0.0.1:9222 --wait-for-human 120
 ```
 
-On a challenge the scraper prints what to do, re-checks every 2s, and once
-the challenge is gone collects results (including the `web-unified-search`
-XHR). If it is still there after the timeout the run exits `3` (blocked).
+On a challenge — right after opening the search, or mid-run (PerimeterX
+has stepped in after the first results poll) — the scraper prints what to
+do, re-checks every 2s, and once the challenge is gone re-opens the search
+if needed and collects results (including the `web-unified-search` XHR).
+The flag's seconds are ONE budget for the whole run. If it is still there after the timeout the run exits `3` (blocked).
 With a remote `--cdp-endpoint` (the Scraping Browser) nobody can see the
 window, so the flag only warns.
 
@@ -380,9 +382,11 @@ site):
 - **`diff_runs.py` compares like with like.** It refuses runs that differ in
   route, dates, passengers, cabin or `sort`, and notes when either run was
   capped by `--max-results` ("removed" may then be outside the slice).
-- **Round trips carry the outbound leg only.** A row's `departure_time` /
-  `arrival_time` / `duration` / `stops` describe the first leg; the return
-  leg is in the XHR but not in the output schema yet.
+- **Round trips: two legs, two sets of columns.** `departure_time` /
+  `arrival_time` / `duration` / `stops` / `brand` describe the outbound leg;
+  `return_departure_time` / `return_arrival_time` / `return_duration` /
+  `return_stops` / `return_airline` the return leg (null on one-way). Built
+  from a live LHR⇄BCN response (2026-09-29; trimmed in `fixtures/`).
 - **Only the XHR path is verified.** The `__NEXT_DATA__` and DOM fallbacks
   in `flight_parser.py` are guesses marked `# TODO: verify live`.
 - **Site-specific block marker: one, measured.** `flight_parser.

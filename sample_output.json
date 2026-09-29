@@ -21,7 +21,12 @@
     "departure_time": "2026-11-15T07:45:00",
     "arrival_time": "2026-11-15T11:00:00",
     "duration": "8h 15m",
-    "sort": "best"
+    "sort": "best",
+    "return_departure_time": null,
+    "return_arrival_time": null,
+    "return_duration": null,
+    "return_stops": null,
+    "return_airline": null
   },
   {
     "sku": "LHRJFK-20261115-48cf924019df",
@@ -45,7 +50,12 @@
     "departure_time": "2026-11-15T06:00:00",
     "arrival_time": "2026-11-15T17:29:00",
     "duration": "16h 29m",
-    "sort": "best"
+    "sort": "best",
+    "return_departure_time": null,
+    "return_arrival_time": null,
+    "return_duration": null,
+    "return_stops": null,
+    "return_airline": null
   },
   {
     "sku": "LHRJFK-20261115-c0ea2bf527c6",
@@ -69,6 +79,11 @@
     "departure_time": "2026-11-15T06:00:00",
     "arrival_time": "2026-11-15T17:29:00",
     "duration": "16h 29m",
-    "sort": "best"
+    "sort": "best",
+    "return_departure_time": null,
+    "return_arrival_time": null,
+    "return_duration": null,
+    "return_stops": null,
+    "return_airline": null
   }
 ]

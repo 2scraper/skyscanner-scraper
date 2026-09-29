@@ -534,36 +534,48 @@ def scrape_search(
         log.warning("Search page returned HTTP %d — treating as blocked, not empty.", status)
         blocked = True
 
-    if args.wait_for_human:
-        def _page_html() -> str:
-            try:
-                return driver.page_source
-            except WebDriverException:
-                return ""
-        if detect_from_html(_page_html(), fp.BOT_CHALLENGE_MARKERS):
-            print("\n>>> Bot challenge in the browser window. Complete it by hand "
-                  f"(press and hold the button). Waiting up to {args.wait_for_human}s...\n", file=sys.stderr, flush=True)
-            deadline = time.time() + args.wait_for_human
-            while time.time() < deadline:
-                time.sleep(2)
-                html_now = _page_html()
-                if html_now and not detect_from_html(html_now, fp.BOT_CHALLENGE_MARKERS):
-                    log.info("Challenge cleared by hand — continuing in this session.")
-                    time.sleep(READINESS_WAIT_S)
-                    # Seen live 2026-09-29: after a geo redirect the challenge
-                    # returned to the HOMEPAGE, not the search, so no more
-                    # results would ever arrive there.
-                    if not fp.is_search_url(driver.current_url):
-                        log.info("The challenge returned to %s, not the search: re-opening the search.", driver.current_url)
-                        try:
-                            driver.get(start_url)
-                            time.sleep(READINESS_WAIT_S)
-                        except Exception as exc:  # noqa: BLE001 — the round loop still reads whatever loaded
-                            log.warning("Re-opening the search after the challenge failed: %s", exc)
-                    blocked = False
-                    break
-            else:
-                log.warning("--wait-for-human: challenge still there after %ds.", args.wait_for_human)
+    # --wait-for-human: ONE budget per run (the flag's seconds), spent on
+    # whichever challenge appears — right after navigation, or mid-run (seen
+    # live 2026-09-29: PerimeterX stepped in after the first search-API poll).
+    human_deadline = None
+
+    def _page_html() -> str:
+        try:
+            return driver.page_source
+        except WebDriverException:  # noqa: BLE001 — the challenge page reloads itself mid-read
+            return ""
+
+    def _wait_for_human() -> bool:
+        nonlocal human_deadline
+        if human_deadline is None:
+            human_deadline = time.time() + args.wait_for_human
+        remaining = int(human_deadline - time.time())
+        if remaining <= 0:
+            return False
+        print("\n>>> Bot challenge in the browser window. Complete it by hand "
+              f"(press and hold the button). Waiting up to {remaining}s...\n", file=sys.stderr, flush=True)
+        while time.time() < human_deadline:
+            time.sleep(2)
+            html_now = _page_html()
+            if html_now and not detect_from_html(html_now, fp.BOT_CHALLENGE_MARKERS):
+                log.info("Challenge cleared by hand — continuing in this session.")
+                time.sleep(READINESS_WAIT_S)
+                # Seen live 2026-09-29: after a geo redirect the challenge
+                # returned to the HOMEPAGE, not the search.
+                if not fp.is_search_url(driver.current_url):
+                    log.info("The challenge returned to %s, not the search: re-opening the search.", driver.current_url)
+                    try:
+                        driver.get(start_url)
+                        time.sleep(READINESS_WAIT_S)
+                    except Exception as exc:  # noqa: BLE001 — the round loop still reads whatever loaded
+                        log.warning("Re-opening the search after the challenge failed: %s", exc)
+                return True
+        log.warning("--wait-for-human: challenge still there, %ds budget used up.", args.wait_for_human)
+        return False
+
+    if args.wait_for_human and detect_from_html(_page_html(), fp.BOT_CHALLENGE_MARKERS):
+        if _wait_for_human():
+            blocked = False
 
     seen_skus: set = set()
     merged: List[Product] = []
@@ -575,6 +587,8 @@ def scrape_search(
         _drain_search_api_responses(driver, capture, pending_requests)
         html = driver.page_source
         if detect_from_html(html, fp.BOT_CHALLENGE_MARKERS):
+            if args.wait_for_human and _wait_for_human():
+                continue  # a fresh round on the cleared page; the budget is shared
             blocked = True
         captcha_result = _maybe_solve_captcha(html=html, url=start_url, client=client, policy=args.solve_captcha, min_score=args.min_score, rows_seen=len(merged) + len(capture.payloads))
         if captcha_result and captcha_result.get("action") in ("warning_no_key", "warning_solver_error", "detected_unidentified_widget", "unsupported_vendor", "solve_not_attempted"):

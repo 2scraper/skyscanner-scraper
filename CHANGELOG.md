@@ -9,6 +9,20 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Fixed/Added — 2026-09-29, round trips and mid-run challenges
+- **`--wait-for-human` only looked once**, right after navigation. Live, a
+  PerimeterX challenge appeared AFTER the first search-API poll; the run
+  never waited and ended `partial` with 10 of ~1000+ itineraries. All three
+  engines now wait whenever a challenge appears (one time budget per run),
+  re-open the search if it returned elsewhere, and continue. Verified on a
+  local stand (results → overlay challenge → cleared → homepage → search
+  re-opened → complete), all engines; earlier scenarios re-checked.
+- **Round trips**: `return_departure_time`, `return_arrival_time`,
+  `return_duration`, `return_stops`, `return_airline` (null on one-way),
+  built from a live LHR⇄BCN response; trimmed fixture
+  `fixtures/web_unified_search_lhr_bcn_roundtrip_trimmed.json` + a check.
+  `sample_output.*` regenerated for the new columns.
+
 ### Added — 2026-09-29, the template's §17/§22 checks
 - Every call from the engines and `batch_scraper.py` into a shared module is
   bound against the callee's real signature (98 calls; a mutated keyword in

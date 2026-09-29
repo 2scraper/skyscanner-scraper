@@ -309,6 +309,19 @@ def _():
     assert len(cap.payloads) == 2 and pending == set()
 
 
+@check("round trips: the return leg (legs[1]) fills return_* from a REAL captured LHR⇄BCN response; one-way rows keep them null")
+def _():
+    body = json.loads((ROOT / "fixtures" / "web_unified_search_lhr_bcn_roundtrip_trimmed.json").read_text(encoding="utf-8"))
+    rows = fp.parse_search_json(body, origin="LHR", destination="BCN", depart_date="2026-12-01", return_date="2026-12-08").products
+    assert len(rows) == 2
+    p = rows[0]
+    assert (p.departure_time, p.stops) == ("2026-12-01T09:55:00", "Direct")
+    assert (p.return_airline, p.return_departure_time, p.return_arrival_time, p.return_duration, p.return_stops) == \
+        ("Vueling Airlines", "2026-12-08T18:45:00", "2026-12-08T20:05:00", "2h 20m", "Direct")
+    one_way = fp.parse_search_json(_real_fixture(), **_Q).products
+    assert all(r.return_departure_time is None and r.return_airline is None for r in one_way)
+
+
 @check("currency is null when the data does not state it — never the requested --currency (CLAUDE.md §8)")
 def _():
     import copy

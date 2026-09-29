@@ -101,6 +101,14 @@ class Product:
     arrival_time: Optional[str] = None
     duration: Optional[str] = None
     sort: Optional[str] = None
+    # Round trips: the RETURN leg; null on one-way searches. The fields above
+    # (departure_time … stops) describe the outbound leg. Verified on a live
+    # LHR⇄BCN web-unified-search response, 2026-09-29.
+    return_departure_time: Optional[str] = None
+    return_arrival_time: Optional[str] = None
+    return_duration: Optional[str] = None
+    return_stops: Optional[str] = None
+    return_airline: Optional[str] = None
 
 
 PRODUCT_FIELD_NAMES: List[str] = [f.name for f in fields(Product)]
