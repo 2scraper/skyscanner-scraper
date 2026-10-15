@@ -46,7 +46,7 @@ ENV_KEYS: Dict[str, str] = {
 }
 
 _PLACEHOLDER_RE = re.compile(r"^\s*$")
-# CLAUDE.md §17: a copied .env.example can document a credentialled URL the
+# A copied .env.example can document a credentialled URL the
 # way the vendor documents it — `ws://{login}-zone-...-pid-{profileId}:
 # {password}@cb.2captcha.com:9222` — and a literal-placeholder check (an
 # exact string like "your_key_here") never matches that shape, so pasting
@@ -62,9 +62,8 @@ _BRACED_PLACEHOLDER_RE = re.compile(r"[{}]")
 
 
 def _is_placeholder(value: Optional[str]) -> bool:
-    """One implementation, used by both apply_env() and _report() — CLAUDE.md
-    §17 names the alternative (two independent checks that quietly drift
-    apart) as its own defect class. True for an empty value, or one that
+    """One implementation, used by both apply_env() and _report() — two
+    independent checks would quietly drift apart. True for an empty value, or one that
     still contains a `{...}` example fragment."""
     if value is None:
         return True
@@ -92,7 +91,7 @@ def _read_dotenv(path: Path) -> Dict[str, str]:
     return out
 
 
-# CLAUDE.md §3: "Credentials live in .env next to the scripts" — not in
+# "Credentials live in .env next to the scripts" — not in
 # whatever directory the command happened to be run from.
 DEFAULT_DOTENV = Path(__file__).resolve().parent / ".env"
 

@@ -81,6 +81,20 @@ def _positive_int(value: str) -> int:
     return ivalue
 
 
+def _nonnegative_int(value: str) -> int:
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0 (got {value!r})")
+    return ivalue
+
+
+def _nonnegative_float(value: str) -> float:
+    fvalue = float(value)
+    if fvalue < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0 (got {value!r})")
+    return fvalue
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="skyscanner.com flight search scraper — pyppeteer (Puppeteer) engine",
@@ -99,15 +113,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-results", type=_positive_int, default=30)
     p.add_argument("--max-scrolls", type=_positive_int, default=20)
     p.add_argument("--stall-rounds", type=_positive_int, default=4)
-    p.add_argument("--scroll-delay", type=float, default=1.5)
+    p.add_argument("--scroll-delay", type=_nonnegative_float, default=1.5)
     p.add_argument("--format", choices=["json", "csv"], default="json")
     p.add_argument("--out", default=None)
-    p.add_argument("--retries", type=int, default=2)
-    p.add_argument("--retry-delay", type=float, default=3.0)
+    p.add_argument("--retries", type=_nonnegative_int, default=2)
+    p.add_argument("--retry-delay", type=_nonnegative_float, default=3.0)
     p.add_argument("--proxy", default=None)
     p.add_argument("--proxy-file", default=None)
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=int, default=3)
+    p.add_argument("--proxy-block-retries", type=_nonnegative_int, default=3)
     p.add_argument("--twocaptcha-key", default=None)
     p.add_argument("--captcha-api", default=None, help="Override the 2Captcha API base URL (testing only)")
     p.add_argument("--solve-captcha", choices=["off", "when-blocked"], default="when-blocked")
@@ -143,7 +157,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--scraper-api-timeout", type=int, default=60, help="Seconds 2Captcha itself waits for the target page to finish loading (1-120, their limit)")
     p.add_argument("--scraper-api-url", default=None, help="Override the Scraper API base URL (testing only)")
     p.add_argument("--cdp-endpoint", default=None)
-    p.add_argument("--cdp-block-retries", type=int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session and retry this many times before giving up. Has no effect without --cdp-endpoint.")
+    p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session and retry this many times before giving up. Has no effect without --cdp-endpoint.")
     p.add_argument("--cookies-file", default=None, help="Path to a JSON array of cookies from a session a HUMAN solved manually — loaded before navigating. A way to reuse a person's own solve, never to solve a challenge automatically.")
     p.add_argument("--allow-empty", action="store_true")
     p.add_argument("--wait-for-human", type=int, default=0, metavar="SECONDS",
@@ -182,7 +196,7 @@ def _load_cookies_file(path: Optional[str]) -> Optional[list]:
     """Same JSON-array-of-cookie-dicts contract as playwright_scraper.py's
     identical helper (see that module for the full rationale) — kept as its
     own copy here, not imported, so each engine script stays independently
-    importable with no other engine's driver installed (CLAUDE.md §6)."""
+    importable with no other engine's driver installed."""
     if not path:
         return None
     try:
@@ -205,7 +219,7 @@ async def _apply_cookies(page, cookies: Optional[list]) -> None:
     Network.setCookie shape Playwright's own cookie objects use, so no
     format translation is needed, just a per-cookie filter to the keys
     pyppeteer recognizes. A single bad cookie logs and is skipped rather
-    than aborting the whole set or the run (CLAUDE.md §6)."""
+    than aborting the whole set or the run."""
     if not cookies:
         return
     for cookie in cookies:
@@ -278,7 +292,7 @@ async def _maybe_solve_captcha(*, html: str, url: str, client: Optional[TwoCaptc
         log.warning("A captcha-like marker was detected but no known widget/sitekey could be extracted.")
     elif action == "unsupported_vendor":
         # Name the vendor instead of the vague "no known widget/sitekey"
-        # line. The claim is about THIS page and THIS repo (CLAUDE.md §19),
+        # line. The claim is about THIS page and THIS repo,
         # not about what 2Captcha can do. Logged once per process: this
         # runs every scroll round.
         vendor = result.get("vendor")
@@ -406,7 +420,7 @@ async def scrape_search(
         # pyppeteer's `page.setUserAgent()` is a real, documented API, so
         # (unlike the CDP-auth/proxy-auth limitations below) there is no
         # driver-level reason to leave this one unwired — that would be a
-        # silent gap, not a named exception (CLAUDE.md §4/§6).
+        # silent gap, not a named exception.
         await page.setUserAgent(user_agent)
     await _apply_cookies(page, cookies)
     capture = fp.SearchApiCapture()
@@ -448,7 +462,7 @@ async def scrape_search(
                 log.warning("Proxy %s is dead (%s) — not retrying the same exit.", proxy.masked(), message)
                 if stats is not None:
                     stats.setdefault("dead_proxies", []).append(proxy.masked())
-                break  # CLAUDE.md §8: a dead proxy wants a different exit (run() rotates), not another try
+                break  # A dead proxy wants a different exit (run() rotates), not another try
             else:
                 log.warning("Navigation attempt %d/%d failed: %s", attempt + 1, args.retries + 1, message)
             if attempt < args.retries:
@@ -577,7 +591,7 @@ async def scrape_search(
 
     await browser.close()
     if blocked and merged:
-        # CLAUDE.md §8: detected ≠ blocking. A challenge marker (or an error
+        # Detected ≠ blocking. A challenge marker (or an error
         # status) on a run that collected itineraries guarded nothing.
         log.warning("A challenge/error was seen, but %d itineraries were collected — reporting the data, not a block.", len(merged))
         blocked = False
@@ -599,7 +613,7 @@ def _scrape_via_scraper_api(
     """--scraper-api's own fetch path — see playwright_scraper.py's copy of
     this function for the full rationale and the live 2026-09-22 findings
     (identical logic, duplicated per engine per this family's own
-    convention — CLAUDE.md §4). One browserless HTTP call (plain
+    convention). One browserless HTTP call (plain
     `requests`, not pyppeteer — nothing here needs `await`)."""
     try:
         result = client.scrape_url(start_url, timeout=args.scraper_api_timeout)
@@ -671,7 +685,7 @@ async def run(args: argparse.Namespace) -> int:
 
     if args.scraper_api:
         # A whole separate, browserless code path — no pyppeteer is needed
-        # at all here (see CLAUDE.md §6), so the pyppeteer_launch-is-None
+        # at all here, so the pyppeteer_launch-is-None
         # check below is skipped entirely.
         if not args.twocaptcha_key:
             print("Error: --scraper-api requires --twocaptcha-key/TWOCAPTCHA_KEY", file=sys.stderr)
@@ -723,8 +737,7 @@ async def run(args: argparse.Namespace) -> int:
     except ProxyParseError as exc:
         # A malformed --proxy/--proxy-file line is a usage mistake, not a
         # crash — see playwright_scraper.py's identical fix for the full
-        # incident writeup (same unguarded bug, confirmed also present in
-        # stockx-scraper and left unfixed there per standing instruction).
+        # incident writeup.
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
     proxy_pool = ProxyPool(proxies, shuffle=args.proxy_shuffle, block_retries=args.proxy_block_retries) if proxies else None
@@ -740,7 +753,7 @@ async def run(args: argparse.Namespace) -> int:
     user_agent = None
     cdp_refused_fingerprint = bool(args.fingerprint) and refuse_if_cdp(args.cdp_endpoint)
     if args.stealth and args.cdp_endpoint:
-        # CLAUDE.md §8: never layer our own fingerprint patches over a CDP
+        # Never layer our own fingerprint patches over a CDP
         # browser — it brings its own identity (the Scraping Browser's, or
         # your real Chrome's), and a patched half of one is a contradiction.
         log.warning("Ignoring --stealth: a --cdp-endpoint browser already has its own identity.")
@@ -784,7 +797,7 @@ async def run(args: argparse.Namespace) -> int:
                     )
                     await asyncio.sleep(args.retry_delay)
         else:
-            # CLAUDE.md §8: a dead proxy wants a DIFFERENT exit, and a rotation
+            # A dead proxy wants a DIFFERENT exit, and a rotation
             # is a fresh browser. One attempt per proxy in the pool at most.
             rotations = len(proxy_pool) if proxy_pool else 1
             for rotation in range(rotations):

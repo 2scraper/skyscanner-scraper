@@ -12,8 +12,8 @@ skyscanner.com flight-search scraper: origin/destination/dates in, a flat
 list of itineraries out. Three engines (Playwright primary, Selenium and
 Puppeteer/pyppeteer for parity), JSON or CSV output, an open, documented
 `Product` schema. Part of the [2scraper](https://github.com/2scraper)
-family — same output contract, exit codes, and family modules as
-`stockx-scraper`.
+family — the same output contract and exit codes as its sibling
+scrapers.
 
 ## Read this before trusting a run
 
@@ -60,7 +60,7 @@ What is measured, as of 2026-09-29. The dated investigation that got here
 
 ## Local-first
 
-Like stockx-scraper, this does **not** require 2Captcha's paid Scraping
+This does **not** require 2Captcha's paid Scraping
 Browser API to run. The default is an ordinary local headless Chromium,
 no proxy, no key, no account. `--proxy` / `--cdp-endpoint` / `--fingerprint`
 are opt-in power options for volume, a specific exit country, or a
@@ -182,7 +182,7 @@ are the four non-honest-messaging mitigations for the confirmed
 PerimeterX gap (see "Read this before trusting a run" above) — each is a
 no-op until, respectively, `--cdp-endpoint`/a block actually happens, a
 cookies file is passed, the flag is set, or the flag is set. Present on
-all three engines for flag parity (CLAUDE.md §4), but `--cdp-block-
+all three engines for flag parity, but `--cdp-block-
 retries` is genuinely weaker on Selenium — see "Engines" below.
 `--scraper-api` is the odd one out structurally: every other flag above
 still launches a local/`--cdp-endpoint` browser this process drives
@@ -193,11 +193,7 @@ own infrastructure and ignores `--proxy`/`--cdp-endpoint`/`--fingerprint`/
 
 Identical across all three engines — a smoke_test.py check asserts the
 three parsers' flag sets never drift apart. `--fingerprint`/`--fp-tags`/
-`--fp-country` apply to Selenium and Puppeteer too (as of this pass —
-earlier revisions only wired them into `playwright_scraper.py`, a silent
-per-engine gap now closed the same way `stockx-scraper`'s selenium/
-puppeteer engines still lack it, unfixed there per the standing
-instruction not to touch that repo): each engine sets whatever user agent
+`--fp-country` apply to Selenium and Puppeteer too: each engine sets whatever user agent
 the 2Captcha Fingerprint API returns via its own driver's real primitive
 (Playwright's `new_context(user_agent=...)`, pyppeteer's
 `page.setUserAgent()`, Chrome's own `--user-agent=` switch under
@@ -206,7 +202,7 @@ fingerprint" below. `--captcha-api` overrides the 2Captcha REST base URL
 (testing only — this is how the fingerprint/min-score wiring above was
 actually verified live, against a local mock, not just unit-tested).
 `--min-score` is 2Captcha's own `minScore` field on a `RecaptchaV3Task`
-request (0.3 default, matching `stockx-scraper`'s).
+request (0.3 default).
 
 ### Family flags that don't apply here — and why
 
@@ -220,7 +216,7 @@ rather than a multi-page listing:
   have no marketplace-style category — `--max-scrolls`/`--stall-rounds`
   and `--origin`/`--destination`/etc. are this repo's actual equivalents
   (see "Pagination" below; already noted in the 1.0.0 CHANGELOG entry).
-- **`--concurrency`**: the family's worker-owns-one-exit model (§7)
+- **`--concurrency`**: the family's worker-owns-one-exit model
   parallelizes fetching *independently-addressable pages of the same
   search* — page 2 doesn't need page 1's DOM. A scroll-based page has no
   such unit: there is exactly one page and one DOM, and every scroll
@@ -269,15 +265,13 @@ confirms the field name. Omitting a signal honestly beats guessing it.
 
 The family adds a shared `page_flow.py`/`STATE_POLICY` module once a site
 answers a request in more than two ways that each want a different
-retry/solve/blocked decision (MediaMarkt: four ways; Amazon: five).
-skyscanner.com, as currently understood — entirely from the draft this
-repo was rebuilt from, never from a live capture — answers in the same two
-ways farfetch.com does (content, or a bot challenge/blocked page), which
-is exactly the case the family's own convention says does NOT need
-`page_flow.py`: farfetch-scraper doesn't have one either. Revisit this if
-a live capture ever turns up a third distinct response shape (e.g. a
-locale-specific "no such route" page, or a throttle distinct from a
-challenge) that should be retried differently than a plain block.
+retry/solve/blocked decision. In the live captures described above
+(2026-09-29) skyscanner.com answered two ways: the search page with its
+`web-unified-search` XHR, or PerimeterX's "Press & Hold" challenge. Two
+answers do not need a shared policy table, so each engine decides inline.
+Revisit this if a capture ever turns up a third distinct response shape
+(e.g. a locale-specific "no such route" page, or a throttle distinct from
+a challenge) that should be retried differently than a plain block.
 
 Credentials belong in `.env` / `SKYSCANNER_PROXY` / `TWOCAPTCHA_KEY` —
 never as literal `--proxy`/`--twocaptcha-key` text on a shared or logged
@@ -292,7 +286,9 @@ specific columns after:
 sku, source, category, title, brand, price, currency, price_source, product_url,
 image_url, scraped_at,
 origin, destination, depart_date, return_date, adults, cabin_class, stops,
-departure_time, arrival_time, duration, sort
+departure_time, arrival_time, duration, sort,
+return_departure_time, return_arrival_time, return_duration, return_stops,
+return_airline
 ```
 
 skyscanner.com has no persistent SKU the way a marketplace does — `sku`
@@ -311,7 +307,10 @@ LHR→JFK, 2026-09-29) by the same parser and writer a run uses.
 
 **Exit codes**: `0` complete · `1` crash · `2` bad usage · `3` blocked ·
 `4` zero itineraries (and nothing was written) · `5` the content was never
-obtained (remote API error, navigation failure, dead proxy) · `6` partial.
+obtained (remote API error, navigation failure, dead proxy), or the search
+API stated itineraries and the parser read none of them (`status` and
+`stop_reason: parser_found_nothing` — a parser problem, not an empty
+route) · `6` partial.
 Every completed/partial run writes a `<out>.meta.json` sidecar with
 `status`, `stop_reason`, `pages_completed` (scroll rounds, here),
 `failed_pages`, `price_confirmed_pct`, and the site's own arithmetic:
@@ -324,10 +323,19 @@ sidecar and no output at all, so it can never overwrite a previous good
 run (`--allow-empty` opts out of the "don't write an empty result" half of
 that guard only).
 
+Output files and the sidecar are written to a temporary file in the same
+directory and renamed into place, so a crash or a full disk mid-write
+leaves the previous file intact rather than truncated. A new file gets
+the mode your umask gives; an existing file keeps its mode. In CSV only,
+a text cell beginning with `=`, `+`, `-`, `@`, a tab or a line break gets
+a leading `'` so a spreadsheet does not run it as a formula; numbers are
+never touched, the JSON keeps the site's exact text, and the sidecar's
+`csv_cells_escaped` says how many cells were changed.
+
 ## Pagination
 
 skyscanner.com lazy-loads results on scroll rather than exposing numbered
-pages, so — unlike stockx-scraper's `?page=N` loop — every engine here
+pages, so every engine here
 scrolls and re-parses the accumulated page, deduping by `sku`, until
 `--max-results` is reached or `--stall-rounds` consecutive scrolls add
 nothing new (capped by `--max-scrolls` either way).
@@ -336,9 +344,8 @@ nothing new (capped by `--max-scrolls` either way).
 
 Playwright is primary; Selenium and pyppeteer are parity copies — all
 three agree on exit codes and the `Product` schema via the shared
-`output_writer.finish_run()`. Real, stated limits (identical to
-stockx-scraper's, since these are properties of the drivers, not the
-site):
+`output_writer.finish_run()`. Real, stated limits (properties of the
+drivers, not the site):
 
 - **Selenium cannot use an authenticated remote CDP endpoint.**
   chromedriver's `debuggerAddress` takes a bare `host:port`; the Scraping
@@ -406,8 +413,7 @@ site):
   `web-unified-search` XHR; it can only fall back to the unverified
   HTML paths. The three browser engines capture the XHR.
 - **The embedded-JSON extraction path is a generic heuristic, not a
-  pinned query.** stockx-scraper's `getDiscoveryData` query name is
-  confirmed; this repo's `_find_itinerary_lists()` instead walks
+  pinned query.** `_find_itinerary_lists()` walks
   `__NEXT_DATA__` looking for any list of dicts that structurally looks
   like flight results (a price-shaped key alongside a legs/segments-
   shaped one). That's a reasonable bet for a Next.js-based site, not a
@@ -416,30 +422,17 @@ site):
   skyscanner.com's own domain**, deliberately — the booking partner a
   result's deep link points to is out of scope for this tool.
 
-## Before this repo goes public
+## Canary
 
-This repo is not published yet — it lives on disk, not on GitHub. The
-family's own bootstrapping checklist (CLAUDE.md §15 steps 7-8) has three
-steps that only make sense once it is, so they're listed here as pending
-rather than done:
-
-- **Add the org profile README row**, only once this repo is public and at
-  the same bar as its siblings — not before, since a row pointing at a
-  private/nonexistent repo is a broken link (measured on the real org,
-  2026-09-16: 4 of 17 existing rows were already 404 for exactly that
-  reason — see the family standard for the one-line command that checks
-  this, and re-run it, don't just trust this sentence, since the count
-  changes every time anyone publishes anything).
-- **Set the repo's GitHub "About" panel** (description/topics/homepage —
-  see CLAUDE.md §2), which is GitHub-side metadata nothing in this repo
-  can set for itself.
-- **Scan the full git history for credentials before flipping to public**
-  (`git rev-list --objects --all`, not just the working tree) — a commit
-  on top cannot remove what a tag or a merged PR's refs already hold.
-  This matters more than usual here: this session's own testing phase
-  used a version-mismatched-then-matched chromedriver and several
-  synthetic fixture servers, none of which should have touched any real
-  credential, but the scan is what confirms that rather than assumes it.
+`.github/workflows/canary.yml` runs one real LHR→JFK search daily and
+asserts exit 0, `status: complete`, a row floor (`MIN_ITINERARIES` in
+`.github/canary_assert.py`) from the
+search-API XHR, and 95% of rows priced and with a currency. From a GitHub
+runner (a datacentre address) every measured run was challenged, so each
+job needs a secret: `SKYSCANNER_PROXY` (a residential proxy) or
+`SKYSCANNER_CDP_ENDPOINT` (a Scraping Browser API endpoint). Without its
+secret a job FAILS with an error naming the secret — a red canary badge
+here may mean "not configured", and the log says which.
 
 ## Development
 

@@ -93,7 +93,7 @@ def diff(old_path: str, new_path: str) -> dict:
 
     capped = [label for label, meta in (("old", old_meta), ("new", new_meta)) if meta.get("capped_by_max_results")]
     return {
-        # CLAUDE.md §21: in a capped run "removed" can also mean "outside this
+        # In a capped run "removed" can also mean "outside this
         # run's slice", not delisted.
         "capped_runs": capped,
         "added": added, "removed": removed,

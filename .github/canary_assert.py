@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert a canary run (CLAUDE.md §11): exit code, status, a floor, price and
+"""Assert a canary run: exit code, status, a floor, price and
 currency coverage, and that rows came from the search-API XHR.
 
 Usage: canary_assert.py <out.json> <exit_code>. Exit 0 = pass, 1 = fail, with

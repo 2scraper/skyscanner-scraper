@@ -2,21 +2,20 @@
 """output_writer.py — the row model, JSON/CSV writer, dedupe, exit codes,
 and run metadata. Carries (almost) no site knowledge: everything here is
 part of the family's shared output CONTRACT — diverging from it needs a
-written reason, not a per-site tweak. Ported from stockx-scraper's
-output_writer.py (family template, commit 00b5570); the exit codes,
-STATUS_BY_EXIT map, and finish_run() outcome-precedence logic are IDENTICAL
-to that file on purpose, including the fix from a 2026-09-15 audit that
-found `blocked` / `remote_api_error` were being silently ignored whenever
+written reason, not a per-site tweak. finish_run()'s outcome precedence
+never lets `blocked` / `remote_api_error` be silently ignored because
 products were present or --allow-empty was passed.
 """
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
+import os
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field, fields
-from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 # --------------------------------------------------------------------------- #
 # Exit codes — identical across playwright_scraper / selenium_scraper /
@@ -49,7 +48,7 @@ STATUS_BY_EXIT = {
 @dataclass
 class Product:
     """Family-common fields first (same order in JSON and CSV across every
-    2scraper repo, including stockx-scraper); skyscanner.com-specific
+    2scraper repo); skyscanner.com-specific
     (flight) fields at the end.
 
     Skyscanner has no persistent "SKU" the way a marketplace has a style
@@ -68,12 +67,11 @@ class Product:
     does, and cabin class already has its own field below.
 
     `price` / `currency` / `price_source` are the columns diff_runs.py and
-    every cross-site tool key off, same as stockx-scraper. `price_source`
-    is `"embedded_json"` when the price came from Skyscanner's own
-    hydration state (Next.js/Apollo state embedded in the page) and
-    `"dom"` when it was read off the rendered result card directly — the
-    family's "embedded-JSON-first, DOM fallback" parsing order, named
-    the same way here as in product_parser.py.
+    every cross-site tool key off. `price_source` records where the row
+    was read: `"search_api"` for the `web-unified-search` XHR the results
+    page polls (the primary source; the initial HTML is an empty shell),
+    `"embedded_json"` for hydration state embedded in the page, and
+    `"dom"` for a rendered result card — see flight_parser.py.
     """
 
     # --- family-common ---
@@ -143,26 +141,109 @@ def merge_pages(pages: Sequence[Sequence[Product]]) -> List[Product]:
 # --------------------------------------------------------------------------- #
 # Writers
 # --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def _atomic(path: str, newline: Optional[str] = None):
+    """Write to a temporary file beside `path`, then rename over it.
+
+    `open(path, "w")` truncates before a single byte is written, so a crash,
+    a kill or a full disk halfway through `json.dump` leaves a SHORTER file
+    where a complete one was — the previous good run destroyed by the
+    attempt to replace it. Reproduced here before this writer existed: a
+    680-byte good `out.json` came back 0 bytes after a failed rewrite.
+
+    * the temp file goes in the target's OWN directory, because `os.replace`
+      is atomic only within one filesystem;
+    * `fsync` before the rename makes the bytes durable, not merely visible;
+    * `newline` is passed through so the csv module's `newline=""`
+      requirement survives the move into the temp file.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline=newline, dir=directory,
+        prefix=os.path.basename(path) + ".", suffix=".tmp", delete=False)
+    try:
+        with handle:
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        # NamedTemporaryFile creates at 0600 and os.replace keeps that mode.
+        # An existing target keeps its OWN mode (it may have been tightened
+        # on purpose); a new one gets exactly what open() would have given
+        # it, `0o666 & ~umask` — never a flat 0644, which narrows 0664 under
+        # umask 002.
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(handle.name, mode)
+        os.replace(handle.name, path)
+    except BaseException:
+        # Including KeyboardInterrupt: never leave `out.json.xxxx.tmp` behind.
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
+
+
+# A spreadsheet treats a cell beginning with one of these as a FORMULA. Some
+# columns here (airline names, deeplink URLs) come from the site, so a CSV
+# cell starting with one gets a leading apostrophe, which Excel, Sheets and
+# LibreOffice read as "text" and do not display. CSV only: the JSON keeps the
+# site's bytes, and `csv_cells_escaped` in the sidecar declares the
+# difference. Only STRINGS are touched, so a negative number stays a number.
+CSV_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r", "\n")
+CSV_FORMULA_ESCAPE = "'"
+
+
+def _csv_value(v: Any) -> Any:
+    # Lists/dicts are serialised first, and the escape runs AFTER, because
+    # the joined cell can start with a formula character too.
+    if isinstance(v, (list, tuple)):
+        return " | ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return json.dumps(v, ensure_ascii=False)
+    return v
+
+
+def _csv_escape(v: Any):
+    """Returns (value, was_escaped)."""
+    if isinstance(v, str) and v.startswith(CSV_FORMULA_LEADS):
+        return CSV_FORMULA_ESCAPE + v, True
+    return v, False
+
+
 def write_json(products: Sequence[Product], out_path: str) -> None:
-    with open(out_path, "w", encoding="utf-8") as f:
+    with _atomic(out_path) as f:
         json.dump([asdict(p) for p in products], f, ensure_ascii=False, indent=2)
 
 
-def write_csv(products: Sequence[Product], out_path: str) -> None:
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
+def write_csv(products: Sequence[Product], out_path: str) -> int:
+    """Returns how many cells were formula-escaped."""
+    escaped = 0
+    with _atomic(out_path, newline="") as f:
         writer = csv.DictWriter(f, fieldnames=PRODUCT_FIELD_NAMES)
         writer.writeheader()  # written even for zero rows — a consumer reads
         for p in products:    # an empty table, not a zero-byte file.
-            writer.writerow(asdict(p))
+            row = {}
+            for k, v in asdict(p).items():
+                value, was = _csv_escape(_csv_value(v))
+                row[k] = value
+                escaped += was
+            writer.writerow(row)
+    return escaped
 
 
-def write_output(products: Sequence[Product], out_path: str, fmt: str) -> None:
+def write_output(products: Sequence[Product], out_path: str, fmt: str) -> int:
+    """Returns the number of CSV cells escaped (0 for JSON)."""
     if fmt == "json":
         write_json(products, out_path)
-    elif fmt == "csv":
-        write_csv(products, out_path)
-    else:
-        raise ValueError(f"Unsupported format: {fmt!r} (expected 'json' or 'csv')")
+        return 0
+    if fmt == "csv":
+        return write_csv(products, out_path)
+    raise ValueError(f"Unsupported format: {fmt!r} (expected 'json' or 'csv')")
 
 
 # --------------------------------------------------------------------------- #
@@ -203,18 +284,15 @@ def write_meta(
     }
     if extra:
         meta.update(extra)
-    Path(meta_path_for(out_path)).write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    with _atomic(meta_path_for(out_path)) as f:
+        f.write(json.dumps(meta, ensure_ascii=False, indent=2))
 
 
 # --------------------------------------------------------------------------- #
 # finish_run — the single place every engine calls to decide exit code,
 # whether to write output at all, and whether to write a sidecar. Keeping
 # this in one shared function is what stops the three engines' exit-code
-# mapping from drifting apart. Structurally identical to stockx-scraper's
-# post-audit-fix finish_run() (commit 00b5570) — see that file's comment
-# for the full incident writeup this precedence order fixes.
+# mapping from drifting apart.
 # --------------------------------------------------------------------------- #
 def finish_run(
     *,
@@ -234,12 +312,23 @@ def finish_run(
     extra_meta: Optional[dict] = None,
     stop_reason: Optional[str] = None,
     incomplete: bool = False,
+    rows_stated: Optional[int] = None,
 ) -> int:
     """Decide status/exit code, write output + sidecar (or neither), return
     the process exit code. NEVER writes a sidecar for a failed run, and
     NEVER overwrites a previous good output with an empty one unless the
-    caller explicitly passed --allow-empty."""
+    caller explicitly passed --allow-empty.
+
+    `rows_stated`: how many results the SITE said it had (the search API's
+    own itinerary ids). Defaults to `extra_meta["itineraries_available"]`,
+    which every engine already passes. Zero parsed rows against a positive
+    stated count is OUR parser failing on a served search, not an empty
+    search, so it is reported as `parser_found_nothing` with exit 5 rather
+    than exit 4 — a "no flights" answer would send the reader to check the
+    route instead of the parser."""
     failed_pages = failed_pages or []
+    if rows_stated is None and extra_meta:
+        rows_stated = extra_meta.get("itineraries_available")
     # `incomplete`: the site itself had not finished serving (e.g. a search
     # API still reporting "incomplete") when the run stopped.
     partial = (bool(failed_pages) and pages_completed > 0) or (incomplete and bool(products))
@@ -252,14 +341,18 @@ def finish_run(
     # caller also passed --allow-empty, and it must never do so just
     # because SOME batches did return results while the run was, in fact,
     # blocked partway through.
-    # CLAUDE.md §9: 5 means "the content was never obtained" — a run that
-    # gathered rows and THEN hit a remote error is partial (6), not 5.
+    # 5 means "the content was never obtained" — a run that gathered rows
+    # and THEN hit a remote error is partial (6), not 5.
     if remote_api_error and zero_products:
         status, exit_code = "remote_api_error", EXIT_REMOTE_API_ERROR
     elif remote_api_error:
         status, exit_code = "partial", EXIT_PARTIAL
     elif blocked:
         status, exit_code = "blocked", EXIT_BLOCKED
+    elif zero_products and rows_stated:
+        # The site served results and said how many; we parsed none.
+        status, exit_code = "parser_found_nothing", EXIT_REMOTE_API_ERROR
+        stop_reason = "parser_found_nothing"
     elif zero_products:
         status, exit_code = "empty", EXIT_ZERO_PRODUCTS
     elif partial:
@@ -279,7 +372,11 @@ def finish_run(
     if zero_products and not allow_empty:
         return exit_code
 
-    write_output(products, out_path, fmt)
+    escaped = write_output(products, out_path, fmt)
+    if fmt == "csv":
+        # Merged UNDER the caller's extra: housekeeping never overwrites
+        # site data that happens to share a key.
+        extra_meta = {"csv_cells_escaped": escaped, **(extra_meta or {})}
     write_meta(
         out_path, status=status, stop_reason=stop_reason or status, engine=engine, url=url,
         pages_requested=pages_requested, pages_completed=pages_completed,
