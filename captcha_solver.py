@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """captcha_solver.py — detection + solving policy. Comments may name a site
 for context; no site-specific selector or URL lives here. Per-site markers
-are passed in by the caller (see BOT_CHALLENGE_MARKERS in product_parser.py)
+are passed in by the caller (see BOT_CHALLENGE_MARKERS in flight_parser.py)
 rather than hardcoded, so this module stays reusable across the family.
 
 Policy, matching the family's hard-won rule that "detected != blocking":
@@ -27,8 +27,8 @@ reCAPTCHA v2/v3, hCaptcha). `identify_unsupported_vendor()` names a
 defense this repo does NOT implement a solve for — PerimeterX, DataDome, a
 Cloudflare managed-challenge interstitial — so the log states the real
 reason instead of "no known widget/sitekey", which reads like a parser
-bug. That is a statement about this repo, not about 2Captcha (CLAUDE.md
-§19): 2Captcha documents `DataDomeSliderTask` for DataDome
+bug. That is a statement about this repo, not about 2Captcha:
+2Captcha documents `DataDomeSliderTask` for DataDome
 (2captcha.com/api-docs/datadome-slider-captcha, read 2026-09-29), and its
 PerimeterX page
 (2captcha.com/p/perimeterx-solver, read 2026-09-29) says that solver is
@@ -47,9 +47,9 @@ from typing import Callable, Optional, Sequence
 from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptchaError
 
 # Generic signals any family site might show. A per-site BOT_CHALLENGE_MARKERS
-# list (product_parser.py) is unioned with this, never a replacement for it.
+# list (flight_parser.py) is unioned with this, never a replacement for it.
 GENERIC_BOT_CHALLENGE_MARKERS: Sequence[str] = (
-    # No "cf-turnstile" (CLAUDE.md §8): the Scraping Browser's extension
+    # No "cf-turnstile": the Scraping Browser's extension
     # injects it into good pages, and measured on sibling repos it missed
     # real Cloudflare challenges. `challenges.cloudflare.com` is on every
     # real challenge and on no served page. (identify_widget() still uses
@@ -127,7 +127,7 @@ def detect_from_html(html: str, extra_markers: Sequence[str] = ()) -> bool:
     deliberately over-inclusive — see module docstring on why detection and
     blocking are decided separately."""
     stripped = _strip_extension_noise(html)
-    # CLAUDE.md §20: the same page reaches us entity-escaped over plain HTTP
+    # The same page reaches us entity-escaped over plain HTTP
     # (`&#47;sttc&#47;px&#47;...`, --scraper-api) and plain from a browser
     # DOM. Normalise a BOUNDED prefix (a challenge page is a few KB — the
     # skyscanner one ~10 KB), not a 1 MB results page.
@@ -200,7 +200,7 @@ def _task_payload(signal: CaptchaSignal, page_url: str, *, proxyless: bool, min_
         # score` is the CLI knob; omitting it would leave 2Captcha's own
         # server-side default in effect, silently, which is the same
         # "documented flag nobody reads" shape this family has shipped
-        # before (CLAUDE.md §17) — so this module always sends one.
+        # before — so this module always sends one.
         task["minScore"] = min_score
     return task
 
@@ -236,8 +236,8 @@ def solve_when_blocked(
         return {"action": "detected_unidentified_widget"}
 
     if not allow_paid_solve:
-        # A token the caller cannot inject buys nothing (CLAUDE.md §23:
-        # "we solved it" and "the token got in" are different claims).
+        # A token the caller cannot inject buys nothing ("we solved
+        # it" and "the token got in" are different claims).
         return {"action": "solve_not_attempted", "captcha_type": signal.captcha_type.value,
                 "reason": "no token-injection path for this site"}
     try:

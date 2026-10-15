@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """flight_parser.py — this IS the skyscanner.com site knowledge (the
-flight-family analog of stockx-scraper's product_parser.py).
+flight-search counterpart of a listing scraper's product parser).
 
 **What is verified, and what is not.** The flight list arrives over the
 `web-unified-search` XHR (engines capture it; see `SearchApiCapture`).
@@ -46,11 +46,10 @@ STOPS_VALUES = ("any", "direct", "1stop")
 SORT_VALUES = ("best", "cheapest", "fastest")
 CABIN_CLASS_VALUES = ("economy", "premiumeconomy", "business", "first")
 
-MIN_CARD_MATCHES = 2  # per family invariant (see stockx-scraper's product_parser.py
-                       # MIN_CARD_MATCHES): must be >1, or one unrelated link resolves
+MIN_CARD_MATCHES = 2  # must be >1, or one unrelated link resolves
                        # a "rendered" wait early.
 
-# REAL, live-captured incident (2026-09-17, via Roman's own run — see
+# REAL, live-captured incident (2026-09-17, via a maintainer's own run — see
 # TESTING.md): a plain local-first request (no proxy, no fingerprint) got
 # served PerimeterX's "Are you a person or a robot?" challenge page
 # (skyscanner.nl locale that day; the Dutch h1 itself is NOT used as a
@@ -298,7 +297,7 @@ def _itinerary_node_to_product(
     # The site prices in the market's currency, not necessarily the one
     # requested — the deeplink path carries the real one (".../en-GB/GBP/...").
     # Not read from the data → null, never the requested --currency
-    # (CLAUDE.md §8: "Missing currency is null").
+    # (missing currency is null, never a default).
     m = re.search(r"/transport_deeplink/[^/]+/[^/]+/[^/]+/([A-Z]{3})/", deep_link or "")
     currency = m.group(1) if m else None
 
@@ -448,7 +447,7 @@ def combine_results(api: SearchResult, html: SearchResult) -> SearchResult:
 
 
 def search_meta(capture: SearchApiCapture, *, collected: int, max_results: int) -> dict:
-    """The site's own arithmetic beside `status` (CLAUDE.md §21 "complete and
+    """The site's own arithmetic beside `status` ("complete and
     exhaustive are different words"): how many itineraries the search API
     offered, whether it had finished, and whether --max-results cut it."""
     ids = set()

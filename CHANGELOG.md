@@ -9,6 +9,43 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+> **Behaviour changes.**
+> - A served search whose search API states itineraries but whose rows all
+>   fail to parse now exits **5** with `status`/`stop_reason:
+>   parser_found_nothing`, instead of exit 4 ("no flights"). Exit 4 now
+>   means the site itself stated no results (or stated nothing).
+> - `selenium_scraper.py` and `puppeteer_scraper.py` now reject a negative
+>   `--retries`, `--retry-delay`, `--scroll-delay`, `--proxy-block-retries`
+>   or `--cdp-block-retries` with exit 2, as Playwright already did for most
+>   of them. `--retries -1` used to skip navigation and report exit 4.
+>   `--retries 0` (one attempt) stays legal. Playwright now validates
+>   `--proxy-block-retries` too.
+> - The canary FAILS when its secret is missing, instead of going green
+>   with a "skipped" notice.
+
+### Fixed
+- Output, CSV and the `.meta.json` sidecar are written atomically: a temp
+  file in the target's directory, fsync, then rename. A crash or full disk
+  mid-write used to truncate the previous good output (reproduced: 680
+  bytes to 0). A new file gets `0o666 & ~umask`; an existing file keeps
+  its mode.
+- CSV cells that begin with `=`, `+`, `-`, `@`, a tab or a line break get a
+  leading `'` so a spreadsheet does not run them as formulas. Numbers and
+  the JSON output are untouched; the sidecar records `csv_cells_escaped`.
+- `repo_scan.py` scans untracked (not ignored) files too, recognises a
+  virtualenv by `pyvenv.cfg` rather than by its name, and fails if it
+  scanned nothing. It now also flags references to the maintainers'
+  private notes, which are not public.
+- README: removed the stale "Before this repo goes public" section, listed
+  the five `return_*` columns in the output contract, rewrote the
+  `page_flow.py` paragraph against the live captures, and dropped internal
+  process notes. Comments that pointed at a `product_parser.py` this repo
+  does not have now point at `flight_parser.py`; the `Product` docstring
+  names `search_api` as the primary `price_source`.
+- References to private, non-public notes were removed from code,
+  workflows, docs and earlier CHANGELOG entries; the rule each one cited is
+  stated in place or the reference is dropped.
+
 ## [1.0.0] — 2026-09-29
 
 First release. It covers the initial build (2026-09-16, never released on
@@ -35,7 +72,7 @@ explained in its entry below:
   predate today; CI had simply never run). They now SKIP visibly there;
   each `engine-smoke` job runs them with its driver.
 - The README-number check read `README.md` inside the Docker image, which
-  ships none — the §22 trap. It skips visibly when README is absent.
+  ships none. It skips visibly when README is absent.
 - Both CI environments were reproduced locally (a driver-less venv and the
   image's file set) before pushing the fix.
 
@@ -53,7 +90,7 @@ explained in its entry below:
   `fixtures/web_unified_search_lhr_bcn_roundtrip_trimmed.json` + a check.
   `sample_output.*` regenerated for the new columns.
 
-### Added — 2026-09-29, the template's §17/§22 checks
+### Added — 2026-09-29, pre-publication checks
 - Every call from the engines and `batch_scraper.py` into a shared module is
   bound against the callee's real signature (98 calls; a mutated keyword in
   a real engine call is reported with its line).
@@ -68,13 +105,13 @@ explained in its entry below:
   exit and its log line claimed "a rerun takes the next one from the pool" —
   false without `--proxy-shuffle` (the pool is rebuilt per process). All
   three engines now repeat the search with the next proxy in a fresh
-  browser (§8), up to one attempt per proxy, and record `dead_proxies`
+  browser, up to one attempt per proxy, and record `dead_proxies`
   (masked) in the sidecar. Verified on a LAN stand through a local forward
   proxy: dead → working, rows proxied, exit 0, all engines.
 - `diff_runs.py` refuses two runs of different searches (route, dates,
-  adults, cabin, sort) and flags capped runs (§21: "removed" may be outside
+  adults, cabin, sort) and flags capped runs ("removed" may be outside
   the slice). Checked on real runs.
-- Challenge markers survive entity-escaped HTML (§20): a bounded 64 KB
+- Challenge markers survive entity-escaped HTML: a bounded 64 KB
   prefix is `html.unescape`d before matching; a check pins both spellings
   and the bound. Real pages: both challenges detected, the normal page and
   a 901 KB live results page not.
@@ -86,13 +123,13 @@ explained in its entry below:
   git history) and by `smoke_test.py`. It tolerates JSON-escaped quotes
   (a key inside a fixture), catches bare 32-hex keys and URL credentials,
   scans `smoke_test.py` too (fake test credentials carry a marker), and
-  checks the family's banned wording (§12) plus capability over-claims
-  (§19, CHANGELOG history exempt). Controls plant each shape and must be
+  checks the family's banned wording plus capability over-claims
+  (CHANGELOG history exempt). Controls plant each shape and must be
   found. History scan: clean (the only hits were two fake test passwords).
 - `.gitignore` rebuilt from the template: `.env*` (was `.env` by name —
   `.env.bak` was not ignored), `*.json`/`*.csv` with explicit exceptions,
   `skyscanner_results.*`, editor/build/cache dirs, `*.key`, `secrets*`.
-- `cf-turnstile` dropped from the generic markers (§8); a check pins that
+- `cf-turnstile` dropped from the generic markers; a check pins that
   it alone is no detection while `challenges.cloudflare.com` is.
 - `sample_output.*` are now cut from the real fixture (were "Fictional Air").
 - canary: both live jobs SKIP with a notice unless their secret is set
@@ -101,19 +138,19 @@ explained in its entry below:
   `results_source == search_api`, ≥50 itineraries, ≥95% priced and with a
   currency. Checked against a live run (361 itineraries → pass) and
   controls (exit 3, 30 rows, no sidecar → fail).
-- `.env` is read next to the scripts, not from the CWD (§3); an explicit
+- `.env` is read next to the scripts, not from the CWD; an explicit
   route beats a saved `SKYSCANNER_URL` (batch routes all went to one URL);
   `env_config.py`'s report prints a value's length only (it printed the
   first 4 and last 2 characters); `batch_scraper`'s fallback check ignores
   placeholders; `python-dotenv` is no longer a hard dependency.
-- A remote error after rows were gathered is partial (6), not 5 (§9).
+- A remote error after rows were gathered is partial (6), not 5.
 - A dead proxy is recognised in all three engines (Playwright did not),
   marked dead, and not retried; exit 5 in ~1 s (verified, all engines).
-- `--stealth` is ignored over `--cdp-endpoint` (§8); the "Ignoring
+- `--stealth` is ignored over `--cdp-endpoint`; the "Ignoring
   --fingerprint" warning only appears when `--fingerprint` was passed.
 - `smoke_test.py` prints which engines it exercised and which it skipped.
 
-### Corrected — 2026-09-29, capability wording (template §19)
+### Corrected — 2026-09-29, capability wording
 - Earlier entries below call the PerimeterX gap "CONFIRMED PERMANENT" and
   say 2Captcha has "no automated task type" for PerimeterX, DataDome or a
   Cloudflare managed challenge. Those sentences are superseded. What is
@@ -149,8 +186,8 @@ explained in its entry below:
   `search_api` (so `diff_runs` reports a switch between paths as
   `source_changed`).
 - **One challenge marker threw away good data.** A marker/error status on a
-  run that collected itineraries no longer turns it into exit 3 (§8:
-  detected ≠ blocking).
+  run that collected itineraries no longer turns it into exit 3 (detected
+  ≠ blocking).
 - **Paid solves bought nothing.** No engine injects a solved token, so
   engines now call `solve_when_blocked(..., allow_paid_solve=False)`: a
   recognised widget is logged as `solve_not_attempted` and nothing is
@@ -269,7 +306,7 @@ explained in its entry below:
   `_enable_scraping_browser_auto_solve()` somewhere in its body, so this
   stays caught automatically if a second entry point (e.g. a per-flight
   detail fetch) is ever added later. `selenium_scraper.py` is correctly
-  exempt — it refuses `--cdp-endpoint` outright (CLAUDE.md §6), so there is
+  exempt — it refuses `--cdp-endpoint` outright, so there is
   no CDP session to arm this on.
 
 ### Added — 2026-09-22, `--scraper-api`: fetch via 2Captcha's Scraper API, all three engines
@@ -352,13 +389,12 @@ explained in its entry below:
   `selenium_scraper.py` via the `Page.addScriptToEvaluateOnNewDocument` CDP
   command, `puppeteer_scraper.py` via `page.evaluateOnNewDocument()`) — each
   runs on every document in the context/page before that document's own
-  scripts execute, and each failure path is caught and logged, never fatal
-  (CLAUDE.md §6). Explicitly **not** a captcha solver or bypass: it changes
+  scripts execute, and each failure path is caught and logged, never fatal. Explicitly **not** a captcha solver or bypass: it changes
   what this browser reveals about itself, nothing about PerimeterX's own
   challenge logic. Unverified as of this entry — combine with
   `--cookies-file` and test live before drawing any conclusion about whether
   it actually helps; `smoke_test.py` confirms only that all three engines
-  expose the identical flag (CLAUDE.md §4 parity), not that it works.
+  expose the identical flag (flag parity), not that it works.
 
 ### Fixed — 2026-09-22, a real crash: page.content() racing a client-side navigation/reload
 - Directly hit live by Roman's own `--cookies-file` test over `--cdp-endpoint`:
@@ -368,8 +404,8 @@ explained in its entry below:
   at the wrong instant raised `Page.content: Unable to retrieve content
   because the page is navigating and changing the content.` — unhandled,
   so it crashed the ENTIRE run (`EXIT_CRASH`, not `EXIT_BLOCKED`),
-  discarding whatever had already been collected. This violated CLAUDE.md
-  §6 (a bad round degrades, it never takes the whole run down). Both
+  discarding whatever had already been collected. This violated the rule
+  that a bad round degrades and never takes the whole run down. Both
   `page.content()` call sites in `scrape_search()` (the round loop, and
   the final `--dump-html` capture) now catch this, wait briefly, retry
   once, and degrade this round/the dump gracefully on a second failure
@@ -494,7 +530,7 @@ explained in its entry below:
   can get past one, via the Scraping Browser API's own auto-solve
   extension).
 
-### Added — bringing this repo into compliance with the family's full CLAUDE.md standard
+### Added — bringing this repo into compliance with the family's full standard
 - **`--fingerprint` / `--fp-tags` / `--fp-country` now work on all three
   engines**, not just Playwright. `selenium_scraper.py` applies the
   fetched user agent via Chrome's own `--user-agent=` switch;
@@ -515,7 +551,7 @@ explained in its entry below:
   of reading the module-level `API_BASE` global directly, which is also
   what let `--captcha-api` be verified live (pointed at a local mock
   server) rather than only unit-tested.
-- Five smoke_test.py checks ported from CLAUDE.md §17's own "five checks
+- Five smoke_test.py checks ported from the family's own "five checks
   worth stealing" list, adapted to this repo: (1) every engine's
   `_maybe_solve_captcha` binds against `captcha_solver.solve_when_
   blocked`'s real signature via `inspect.signature(...).bind(...)`; (2)
@@ -533,10 +569,10 @@ explained in its entry below:
   `--category` don't apply, and why this repo has no `page_flow.py` —
   see README "Family flags that don't apply here" and "Why there's no
   `page_flow.py` here". Each is a structural property of a single
-  scroll-based search page, not an oversight, and CLAUDE.md §1 asks for
+  scroll-based search page, not an oversight, and the family asks for
   the reason to be written down rather than left as a silent deviation.
   Also documented (README "Before this repo goes public") the three
-  CLAUDE.md §15 steps that only apply once this repo is actually
+  family steps that only apply once this repo is actually
   published — org profile row, GitHub "About" panel, git-history
   credential scan — as pending, not done, since this repo isn't public.
 - `fingerprint_client.py`'s module now states explicitly why it applies

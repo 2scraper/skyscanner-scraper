@@ -6,7 +6,7 @@ session tokens — counts, statuses and timestamps only. `smoke_test.py`
 checks every itinerary count README states against these files, the
 fixture and the sample output, so a figure cannot drift from its source.
 
-All runs: 2026-09-29, Playwright over Roman's own local Chrome
+All runs: 2026-09-29, Playwright over a maintainer's own local Chrome
 (`--cdp-endpoint http://127.0.0.1:9222`) after a person cleared PerimeterX's
 "Press & Hold" once (`--wait-for-human`).
 

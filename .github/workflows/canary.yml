@@ -9,11 +9,13 @@ on:
 # automated run against skyscanner.com so far — local Chromium, the Scraping
 # Browser API over --cdp-endpoint, --cookies-file — was challenged by
 # PerimeterX. A GitHub runner is a datacentre address, so an ungated live run
-# here cannot pass, and a check that is red every day teaches everyone to
-# ignore it (CLAUDE.md §11: a canary that cannot pass must SKIP, not fail).
-# So each live job runs only when its secret is configured, and then ASSERTS
-# (status, a floor, price and currency coverage, the XHR source). Without the
-# secret it goes green with a ::notice:: saying it skipped.
+# here cannot pass. Each live job therefore needs its secret, and then ASSERTS
+# (exit 0, status, a floor, price and currency coverage, the XHR source).
+#
+# A missing secret FAILS the job with an ::error:: naming it. A canary that
+# skipped tested nothing, and a green badge on a skip says the site works
+# when nobody looked. A blocked run (exit 3), a parser failure (exit 5) or
+# zero rows is red too.
 
 jobs:
   canary-proxy:
@@ -22,12 +24,13 @@ jobs:
     env:
       HAS_PROXY: ${{ secrets.SKYSCANNER_PROXY != '' }}
     steps:
-      - name: Skip — no SKYSCANNER_PROXY secret
+      - name: Fail — no SKYSCANNER_PROXY secret
         if: env.HAS_PROXY != 'true'
         run: |
-          echo "::notice::SKIPPED, not passed: no SKYSCANNER_PROXY secret. From a datacentre runner \
-          every measured run was challenged by PerimeterX, so an ungated run here cannot pass. Set a \
-          residential SKYSCANNER_PROXY secret to turn this job on."
+          echo "::error::canary NOT RUN: the SKYSCANNER_PROXY repository secret is missing. From a \
+          datacentre runner every measured run was challenged by PerimeterX, so this job needs a \
+          residential proxy (http://user:pass@host:port) to test the site at all."
+          exit 1
       - uses: actions/checkout@v4
         if: env.HAS_PROXY == 'true'
       - uses: actions/setup-python@v5
@@ -39,7 +42,7 @@ jobs:
         run: |
           pip install -r requirements-playwright.txt
           playwright install --with-deps chromium
-      # The credential goes through the ENVIRONMENT, never argv (§3/§11):
+      # The credential goes through the ENVIRONMENT, never argv:
       # env_config.py reads SKYSCANNER_PROXY itself.
       - name: Run a real route, 30 days out
         if: env.HAS_PROXY == 'true'
@@ -72,12 +75,14 @@ jobs:
     env:
       HAS_CDP: ${{ secrets.SKYSCANNER_CDP_ENDPOINT != '' }}
     steps:
-      - name: Skip — no SKYSCANNER_CDP_ENDPOINT secret
+      - name: Fail — no SKYSCANNER_CDP_ENDPOINT secret
         if: env.HAS_CDP != 'true'
         run: |
-          echo "::notice::SKIPPED, not passed: no SKYSCANNER_CDP_ENDPOINT secret. Measured \
-          2026-09-20..29: every Scraping Browser session was challenged by PerimeterX on this site, \
-          so expect this job to fail with exit 3 if you turn it on; it exists to notice if that changes."
+          echo "::error::canary NOT RUN: the SKYSCANNER_CDP_ENDPOINT repository secret is missing \
+          (a Scraping Browser API ws:// endpoint). Measured 2026-09-20..29: every Scraping Browser \
+          session was challenged by PerimeterX on this site, so expect exit 3 (red) once it is set; \
+          the job exists to notice when that changes."
+          exit 1
       - uses: actions/checkout@v4
         if: env.HAS_CDP == 'true'
       - uses: actions/setup-python@v5

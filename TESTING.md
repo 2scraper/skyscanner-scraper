@@ -1,11 +1,15 @@
 # Testing with real credentials and the live site
 
+> **Update, 2026-09-29.** The paragraph below predates the live runs. Since
+> then the `web-unified-search` XHR parser has been verified against real
+> responses captured in a local Chrome (see README "Read this before
+> trusting a run" and `captures/`). The `__NEXT_DATA__` and DOM fallbacks
+> are still unverified guesses.
+
 Everything in this repo's own CHANGELOG/README was verified offline
 (`smoke_test.py`, SYNTHETIC fixture replay — see that file's module
 docstring) or against 2Captcha's REST API directly. **No engine has ever
-been run against the live skyscanner.com, from any environment** — unlike
-stockx-scraper, where the free path was measured live before the repo
-shipped, this repo's own build environment could not even *read*
+been run against the live skyscanner.com, from any environment** — this repo's own build environment could not even *read*
 skyscanner.com to check the page's structure (WebFetch there returns
 ROBOTS_DISALLOWED, and that restriction was not bypassed). This means
 `flight_parser.py`'s selectors and JSON-shape heuristics are best-effort

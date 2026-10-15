@@ -62,7 +62,7 @@ from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptcha
 
 ENGINE_NAME = "playwright"
 
-# --- the handful of engine constants that vary per site (CLAUDE.md §5) ---
+# --- the handful of engine constants that vary per site ---
 NAV_TIMEOUT_MS = 30_000
 READINESS_WAIT_MS = 3_000  # skyscanner.com is a client-rendered SPA — see README
 MIN_CARD_MATCHES = fp.MIN_CARD_MATCHES
@@ -147,7 +147,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--proxy", default=None, help="A single proxy, e.g. http://login:pass@host:port (or set SKYSCANNER_PROXY)")
     p.add_argument("--proxy-file", default=None, help="One proxy per line, same formats as --proxy")
     p.add_argument("--proxy-shuffle", action="store_true")
-    p.add_argument("--proxy-block-retries", type=int, default=3)
+    p.add_argument("--proxy-block-retries", type=_nonnegative_int, default=3)
     p.add_argument("--twocaptcha-key", default=None, help="(or set TWOCAPTCHA_KEY)")
     p.add_argument("--captcha-api", default=None, help="Override the 2Captcha API base URL (testing only)")
     p.add_argument("--solve-captcha", choices=["off", "when-blocked"], default="when-blocked")
@@ -365,7 +365,7 @@ async def _maybe_solve_captcha(
         log.warning("A captcha-like marker was detected but no known widget/sitekey could be extracted.")
     elif action == "unsupported_vendor":
         # Name the vendor instead of the vague "no known widget/sitekey"
-        # line. The claim is about THIS page and THIS repo (CLAUDE.md §19),
+        # line. The claim is about THIS page and THIS repo,
         # not about what 2Captcha can do. Logged once per process: this
         # runs every scroll round.
         vendor = result.get("vendor")
@@ -455,7 +455,7 @@ async def scrape_search(
                 log.warning("Proxy %s is dead (%s) — not retrying the same exit.", proxy.masked(), message)
                 if stats is not None:
                     stats.setdefault("dead_proxies", []).append(proxy.masked())
-                break  # CLAUDE.md §8: a dead proxy wants a different exit (run() rotates), not another try
+                break  # A dead proxy wants a different exit (run() rotates), not another try
             log.warning("Navigation attempt %d/%d failed: %s", attempt + 1, args.retries + 1, last_error)
             if attempt < args.retries:
                 await asyncio.sleep(args.retry_delay)
@@ -527,14 +527,14 @@ async def scrape_search(
             html = await page.content()
         except Exception as exc:  # noqa: BLE001 — page.content() can race a
             # client-side navigation/reload. Confirmed live, 2026-09-22
-            # (Roman's own --cookies-file run over --cdp-endpoint): this
+            # (a maintainer's own --cookies-file run over --cdp-endpoint): this
             # exact call crashed the WHOLE process with "Unable to retrieve
             # content because the page is navigating and changing the
             # content" — almost certainly PerimeterX's own challenge page
             # reloading itself, not a bug in what this scraper asked the
             # page to do. One short wait-and-retry, then degrade this round
-            # instead of taking the whole run down with it (CLAUDE.md §6 —
-            # a bad round must never discard already-collected siblings).
+            # instead of taking the whole run down with it (a bad
+            # round must never discard already-collected siblings).
             log.warning("page.content() failed mid-navigation (%s) — waiting briefly and retrying once.", exc)
             await asyncio.sleep(1.0)
             try:
@@ -622,7 +622,7 @@ async def scrape_search(
 
     await (page.close() if reuse_profile else context.close())
     if blocked and merged:
-        # CLAUDE.md §8: detected ≠ blocking. A challenge marker (or an error
+        # Detected ≠ blocking. A challenge marker (or an error
         # status) on a run that collected itineraries guarded nothing.
         log.warning("A challenge/error was seen, but %d itineraries were collected — reporting the data, not a block.", len(merged))
         blocked = False
@@ -738,7 +738,7 @@ async def run(args: argparse.Namespace) -> int:
 
     if args.scraper_api:
         # A whole separate, browserless code path — no Playwright import is
-        # needed at all here (see CLAUDE.md §6), so it's skipped even though
+        # needed at all here, so it's skipped even though
         # this run() already required it above (mirrors shein-scraper's own
         # --scraper-api, which checks async_playwright further down instead
         # — here the check already happened before this branch exists, so
@@ -797,9 +797,7 @@ async def run(args: argparse.Namespace) -> int:
         # happened to exit 1 by Python's own default rather than through
         # this scraper's EXIT_CRASH path, and reported the wrong code
         # (1, "crashed") for what is actually EXIT_BAD_USAGE (2) — the
-        # same category as a bad --format. Confirmed the identical,
-        # unguarded bug in stockx-scraper's playwright_scraper.py (fixed
-        # here only, per the standing instruction not to touch that repo).
+        # same category as a bad --format.
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
     proxy_pool = ProxyPool(proxies, shuffle=args.proxy_shuffle, block_retries=args.proxy_block_retries) if proxies else None
@@ -811,7 +809,7 @@ async def run(args: argparse.Namespace) -> int:
     user_agent = None
     cdp_refused_fingerprint = bool(args.fingerprint) and refuse_if_cdp(args.cdp_endpoint)
     if args.stealth and args.cdp_endpoint:
-        # CLAUDE.md §8: never layer our own fingerprint patches over a CDP
+        # Never layer our own fingerprint patches over a CDP
         # browser — it brings its own identity (the Scraping Browser's, or
         # your real Chrome's), and a patched half of one is a contradiction.
         log.warning("Ignoring --stealth: a --cdp-endpoint browser already has its own identity.")
@@ -882,7 +880,7 @@ async def run(args: argparse.Namespace) -> int:
                         await asyncio.sleep(args.retry_delay)
             else:
                 autosolve = False
-                # CLAUDE.md §8: a dead proxy wants a DIFFERENT exit, and a rotation
+                # A dead proxy wants a DIFFERENT exit, and a rotation
                 # is a fresh browser. One attempt per proxy in the pool at most.
                 rotations = len(proxy_pool) if proxy_pool else 1
                 for rotation in range(rotations):

@@ -31,7 +31,7 @@ env/
 *.log
 
 # Secrets. `.env*` rather than `.env` by name: `.env.bak`, `.env.save`,
-# `.env.local` are the same file under another name (template §22).
+# `.env.local` are the same file under another name.
 .env*
 !.env.example
 *.key

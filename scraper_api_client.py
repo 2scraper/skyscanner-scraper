@@ -84,8 +84,8 @@ class TwoCaptchaClient:
         self.timeout = timeout
         # `--captcha-api` (testing only): override the base URL so a smoke
         # test or a local run can point this at a mock server instead of
-        # the real https://api.2captcha.com. CLAUDE.md §17 names the exact
-        # failure mode this guards against — a CLI flag defined on the
+        # the real https://api.2captcha.com. The failure mode this
+        # guards against: a CLI flag defined on the
         # parser but never read by anything is "a documented feature not
         # working at all", found live in this family more than once.
         # `self.api_base` (an instance attribute, never the module-level
@@ -114,10 +114,7 @@ class TwoCaptchaClient:
         # pair, so it propagated all the way up as an uncaught crash.
         # That directly contradicts this codebase's own stated policy (see
         # captcha_solver.py's module docstring): "a solver-side error is a
-        # WARNING, never a crash — the run continues". Confirmed the
-        # identical, still-unfixed gap in stockx-scraper's
-        # scraper_api_client.py (left there per the standing instruction
-        # not to touch that repo).
+        # WARNING, never a crash — the run continues".
         try:
             resp = requests.post(f"{self.api_base}{path}", json=payload, timeout=self.timeout)
         except requests.exceptions.RequestException as exc:
@@ -196,8 +193,7 @@ class TwoCaptchaClient:
         # Unlike createTask/getTaskResult/getBalance above, this endpoint
         # takes its key as a URL query parameter (`?key=...`), not a JSON
         # body — and `requests` puts the FULL URL, query string included,
-        # into the text of every HTTPError and connection error (CLAUDE.md
-        # §8 names this exact endpoint). Redact before raising, and drop
+        # into the text of every HTTPError and connection error. Redact before raising, and drop
         # the original exception from the chain (`from None`) so its own
         # unredacted text can't surface via "the above exception was the
         # direct cause of…".
