@@ -2,7 +2,7 @@ name: canary
 
 on:
   schedule:
-    - cron: "23 6 * * *"   # once daily; avoid :00 so it doesn't pile up with everyone else's
+    - cron: "23 6 * * 1"   # weekly, Mondays (every run bills the proxy or Scraping Browser); avoid :00 so it doesn't pile up with everyone else's
   workflow_dispatch: {}     # dispatch manually at least once (from the default branch) before trusting the badge
 
 # What is measured (README "Read this before trusting a run"): every fully
