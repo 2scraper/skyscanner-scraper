@@ -9,6 +9,8 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-16
+
 > **Behaviour changes.**
 > - A served search whose search API states itineraries but whose rows all
 >   fail to parse now exits **5** with `status`/`stop_reason:
