@@ -9,6 +9,12 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: both canary jobs bill a paid route (`SKYSCANNER_PROXY`,
+  `SKYSCANNER_CDP_ENDPOINT`), so the canary now runs weekly (Mondays 06:23 UTC)
+  instead of daily; a manual dispatch still runs it.
+
 ## [1.1.0] — 2026-10-16
 
 > **Behaviour changes.**

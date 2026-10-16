@@ -424,7 +424,7 @@ drivers, not the site):
 
 ## Canary
 
-`.github/workflows/canary.yml` runs one real LHR→JFK search daily and
+`.github/workflows/canary.yml` runs one real LHR→JFK search weekly (Mondays) and
 asserts exit 0, `status: complete`, a row floor (`MIN_ITINERARIES` in
 `.github/canary_assert.py`) from the
 search-API XHR, and 95% of rows priced and with a currency. From a GitHub
