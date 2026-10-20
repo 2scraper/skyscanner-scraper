@@ -43,6 +43,8 @@ ENV_KEYS: Dict[str, str] = {
     "SKYSCANNER_PROXY": "proxy",
     "SKYSCANNER_CDP_ENDPOINT": "cdp_endpoint",
     "SKYSCANNER_URL": "url",
+    # "1" keeps images/video/fonts loading through a proxy (--load-media).
+    "SKYSCANNER_LOAD_MEDIA": "load_media",
 }
 
 _PLACEHOLDER_RE = re.compile(r"^\s*$")

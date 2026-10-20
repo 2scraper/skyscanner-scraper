@@ -53,10 +53,11 @@ else:
     _PLAYWRIGHT_IMPORT_ERROR = None
 
 import env_config
+import proxy_check
 import flight_parser as fp
 from captcha_solver import detect_from_html, solve_when_blocked
 from fingerprint_client import fetch_fingerprint, refuse_if_cdp, user_agent_from
-from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, merge_pages, sku_key as _sku_key
+from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, finish_without_fetch, merge_pages, sku_key as _sku_key
 from proxy_pool import Proxy, ProxyPool, ProxyParseError, is_proxy_dead_error, load_proxies, redact_credentials
 from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptchaError
 
@@ -152,6 +153,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--captcha-api", default=None, help="Override the 2Captcha API base URL (testing only)")
     p.add_argument("--solve-captcha", choices=["off", "when-blocked"], default="when-blocked")
     p.add_argument("--min-score", type=float, default=0.3, help="Minimum acceptable reCAPTCHA v3 score (2Captcha's minScore task field)")
+    proxy_check.add_media_flags(p)
     p.add_argument("--cdp-endpoint", default=None, help="Connect to a remote CDP session (e.g. the 2Captcha Scraping Browser API) instead of launching locally (or set SKYSCANNER_CDP_ENDPOINT) — opt-in, not required for a normal run")
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session (a different exit identity from the pool) and retry this many times before giving up. Reputation/behavior-based defenses sometimes simply don't challenge a fresh session at all. Has no effect without --cdp-endpoint.")
     p.add_argument("--cookies-file", default=None, help="Path to a JSON array of cookies (Playwright's context.cookies() shape) from a session a HUMAN solved manually — loaded into the browser context before navigating. This is a way to reuse a person's own solve, never a way to solve a challenge automatically.")
@@ -421,6 +423,8 @@ async def scrape_search(
             await context.add_cookies(cookies)
     else:
         context = await _new_context(browser, proxy, user_agent, cookies=cookies, stealth=args.stealth)
+        if proxy_check.block_media(args, proxy, remote=bool(args.cdp_endpoint)):
+            await proxy_check.install_playwright(context)
     page = await context.new_page()
     capture = fp.SearchApiCapture()
 
@@ -801,6 +805,16 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
     proxy_pool = ProxyPool(proxies, shuffle=args.proxy_shuffle, block_retries=args.proxy_block_retries) if proxies else None
+    # One request through the proxy before a browser exists: a 407 or 402
+    # from the gateway ends the run here, in seconds, instead of surfacing
+    # as a navigation timeout after every retry. Not over --cdp-endpoint,
+    # where the local proxy is ignored.
+    refused = proxy_check.gate(None if args.cdp_endpoint else proxy_pool, start_url)
+    if refused:
+        return finish_without_fetch(
+            args.out, stop_reason=refused.stop_reason, engine=ENGINE_NAME,
+            url=start_url, pages_requested=args.max_scrolls, started_at=started_at)
+
 
     client = None
     if args.twocaptcha_key and (args.solve_captcha != "off" or args.fingerprint):

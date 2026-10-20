@@ -654,7 +654,9 @@ def _():
             raise AssertionError("expected TwoCaptchaError")
         except scraper_api_client.TwoCaptchaError as exc:
             assert "topsecretkey123" not in str(exc)
-    profile = fingerprint_client.fetch_fingerprint(client)
+        # Inside the mock: outside it this made a real request to the
+        # Fingerprint API carrying the fake key.
+        profile = fingerprint_client.fetch_fingerprint(client)
     assert profile is None, "a failed fingerprint fetch must degrade to None, never crash the caller"
 
 
@@ -1657,6 +1659,426 @@ def _():
         assert "untracked.py" in names, f"an untracked file was not scanned: {names}"
         assert not any(n.startswith("myenv/") for n in names), f"a virtualenv was walked into: {names}"
         assert any(x.startswith("untracked.py") for x in repo_scan.credential_findings(files, root))
+
+
+# --------------------------------------------------------------------------- #
+# Proxy traffic savers: the pre-check before any browser, media blocking
+# through a local proxy. Everything here stays on 127.0.0.1.
+# --------------------------------------------------------------------------- #
+_SAVERS_URL = "https://www.skyscanner.com/transport/flights/lhr/jfk/261115/"
+_SAVERS_SECRET = "s3cret-Pw-not-real"  # scan: fake-credential
+
+
+class _StubProxy:
+    """A one-port HTTP proxy on 127.0.0.1 that answers every request with a
+    fixed status and records the request heads it received."""
+
+    def __init__(self, status):
+        import socket
+        import threading
+        self.status, self.heads = status, []
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                self.heads.append(data.decode("latin-1"))
+                reason = {407: "Proxy Authentication Required",
+                          402: "Payment Required", 200: "OK"}.get(self.status, "X")
+                conn.sendall(f"HTTP/1.1 {self.status} {reason}\r\n"
+                             "Content-Length: 0\r\nConnection: close\r\n\r\n".encode())
+
+    def proxy(self, secret=_SAVERS_SECRET):
+        return proxy_pool.Proxy(host="127.0.0.1", port=self.port,
+                                login="user-zone-x", password=secret)
+
+    def line(self, secret=_SAVERS_SECRET):
+        # host:port:login:password — no line here looks like a credentialled URL.
+        return "127.0.0.1:" + str(self.port) + ":user-zone-x:" + secret
+
+    def close(self):
+        self.sock.close()
+
+
+def _closed_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+class _Captured:
+    """stdout plus every log record, as one string."""
+
+    def __enter__(self):
+        import contextlib
+        import io
+        import logging
+        self.buf = io.StringIO()
+        self._handler = logging.StreamHandler(self.buf)
+        logging.getLogger().addHandler(self._handler)
+        self._redirect = contextlib.redirect_stdout(self.buf)
+        self._redirect.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        import logging
+        self._redirect.__exit__(*exc)
+        logging.getLogger().removeHandler(self._handler)
+        return False
+
+    def text(self):
+        return self.buf.getvalue()
+
+
+def _pool(*proxies):
+    return proxy_pool.ProxyPool(list(proxies))
+
+
+@check("proxy pre-check: a 407 is auth_failed and fatal, sent as ONE CONNECT with the credential, and the message names SKYSCANNER_PROXY without printing it")
+def _():
+    import proxy_check
+    stub = _StubProxy(407)
+    try:
+        res = proxy_check.precheck(proxy_check.proxy_url(stub.proxy()), _SAVERS_URL, timeout=5)
+        assert res.outcome == "auth_failed" and res.fatal, res
+        assert res.stop_reason == "proxy_auth_failed", res.stop_reason
+        assert len(stub.heads) == 1, stub.heads
+        head = stub.heads[0]
+        assert head.startswith("CONNECT www.skyscanner.com:443 "), head[:60]
+        assert "Proxy-Authorization: Basic " in head
+        with _Captured() as cap:
+            gated = proxy_check.gate(_pool(stub.proxy()), _SAVERS_URL, timeout=5)
+        text = cap.text()
+        assert gated is not None and gated.fatal, "gate() must return the fatal check on a 407"
+        assert "SKYSCANNER_PROXY" in text and "refused the credential" in text, text
+        assert "traffic balance is exhausted" in text, text
+        assert _SAVERS_SECRET not in text and "user-zone-x" not in text, "credential printed"
+    finally:
+        stub.close()
+
+
+@check("proxy pre-check: a 402 is balance_exhausted and fatal, message says traffic/balance exhausted")
+def _():
+    import proxy_check
+    stub = _StubProxy(402)
+    try:
+        url = proxy_check.proxy_url(stub.proxy())
+        res = proxy_check.precheck(url, _SAVERS_URL, timeout=5)
+        assert res.outcome == "balance_exhausted" and res.fatal, res
+        assert res.stop_reason == "proxy_balance_exhausted"
+        msg = proxy_check.failure_message(res, url)
+        assert "traffic/balance exhausted" in msg and _SAVERS_SECRET not in msg, msg
+    finally:
+        stub.close()
+
+
+@check("proxy pre-check: a plain-http target is one HEAD for its robots.txt; a dead proxy is a transport error and NOT fatal; no pool, no check")
+def _():
+    import proxy_check
+    stub = _StubProxy(200)
+    try:
+        res = proxy_check.precheck(proxy_check.proxy_url(stub.proxy()), "http://127.0.0.1:9/x", timeout=5)
+        assert res.outcome == "ok" and not res.fatal, res
+        assert stub.heads[-1].startswith("HEAD http://127.0.0.1:9/robots.txt "), stub.heads
+    finally:
+        stub.close()
+    dead = proxy_pool.Proxy(host="127.0.0.1", port=_closed_port(), login="u", password=_SAVERS_SECRET)
+    res = proxy_check.precheck(proxy_check.proxy_url(dead), _SAVERS_URL, timeout=5)
+    assert res.outcome == "transport_error" and not res.fatal, res
+    with _Captured() as cap:
+        assert proxy_check.gate(_pool(dead), _SAVERS_URL, timeout=5) is None
+    assert _SAVERS_SECRET not in cap.text()
+    assert proxy_check.gate(None, _SAVERS_URL) is None
+    assert proxy_check.precheck("socks5://127.0.0.1:1", _SAVERS_URL).outcome == "skipped"
+
+
+@check("proxy pre-check: a password with # or ? reaches the proxy exactly as the browser would send it")
+def _():
+    import base64
+    import proxy_check
+    stub = _StubProxy(407)
+    try:
+        odd = "p#a?ss%" + _SAVERS_SECRET
+        proxy_check.precheck(proxy_check.proxy_url(stub.proxy(odd)), _SAVERS_URL, timeout=5)
+        token = stub.heads[-1].split("Proxy-Authorization: Basic ")[1].split("\r\n")[0]
+        assert base64.b64decode(token).decode() == "user-zone-x:" + odd
+    finally:
+        stub.close()
+
+
+@check("finish_without_fetch: exit 5, attempt sidecar says failed/proxy_auth_failed, previous output and .meta.json untouched")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        out = str(Path(td) / "out.json")
+        Path(out).write_text("[1]")
+        Path(out + ".meta.json").write_text("{}")
+        with _Captured():
+            rc = output_writer.finish_without_fetch(
+                out, stop_reason="proxy_auth_failed", engine="playwright",
+                url=_SAVERS_URL, pages_requested=20, started_at=0.0)
+        meta = json.loads(Path(out + ".latest_attempt.meta.json").read_text())
+        assert rc == 5, rc
+        assert meta["status"] == "failed" and meta["stop_reason"] == "proxy_auth_failed", meta
+        assert meta["pages_completed"] == 0 and meta["product_count"] == 0, meta
+        assert Path(out).read_text() == "[1]" and Path(out + ".meta.json").read_text() == "{}"
+
+
+@check("media blocking: decision table (local proxy, --load-media, env 0, no proxy, CDP, forced), flags exclusive, --block-media hidden, env key mapped")
+def _():
+    import argparse
+    import contextlib
+    import io
+    import proxy_check
+    pool = _pool(proxy_pool.Proxy(host="127.0.0.1", port=1))
+    ns = argparse.Namespace
+    default = proxy_check.BLOCK_MEDIA_BY_DEFAULT
+    assert proxy_check.block_media(ns(load_media=None, block_media=False), pool, False) is default
+    assert not proxy_check.block_media(ns(load_media=None, block_media=False), None, False)
+    assert not proxy_check.block_media(ns(load_media=None, block_media=True), pool, True)
+    assert not proxy_check.block_media(ns(load_media=True, block_media=False), pool, False)
+    assert not proxy_check.block_media(ns(load_media="1", block_media=False), pool, False)
+    assert proxy_check.block_media(ns(load_media="0", block_media=False), pool, False) is default
+    assert proxy_check.block_media(ns(load_media=None, block_media=True), None, False)
+    parser = argparse.ArgumentParser()
+    proxy_check.add_media_flags(parser)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            parser.parse_args(["--load-media", "--block-media"])
+        raise AssertionError("--load-media and --block-media must be mutually exclusive")
+    except SystemExit:
+        pass
+    helptext = parser.format_help()
+    assert "--load-media" in helptext
+    assert ("--block-media" in helptext) is (not default), "--block-media is public only when media loads by default"
+    assert env_config.ENV_KEYS.get(proxy_check.LOAD_MEDIA_ENV) == "load_media"
+    # apply_env fills only a None destination: the env var must reach --load-media.
+    args = parser.parse_args([])
+    import os
+    from unittest import mock
+    with mock.patch.dict(os.environ, {proxy_check.LOAD_MEDIA_ENV: "1"}), \
+            tempfile.TemporaryDirectory() as td:
+        env_config.apply_env(args, dotenv_path=str(Path(td) / "none.env"))
+    assert args.load_media == "1", args.load_media
+
+
+@check("media blocking: Playwright route aborts image/media/font only; pyppeteer Fetch pauses only Image/Media/Font and fails them; Selenium blocks media URLs only")
+def _():
+    import asyncio
+    import re
+    from unittest import mock
+    import proxy_check
+
+    ctx = mock.MagicMock()
+    ctx.route = mock.AsyncMock()
+
+    class _Route:
+        def __init__(self, rtype):
+            self.request = mock.MagicMock(resource_type=rtype)
+            self.verdict = None
+
+        async def abort(self):
+            self.verdict = "abort"
+
+        async def continue_(self):
+            self.verdict = "continue"
+
+    async def _drive_playwright():
+        await proxy_check.install_playwright(ctx)
+        pattern, handler = ctx.route.await_args[0]
+        assert pattern == "**/*", pattern
+        out = {}
+        for rtype in ("image", "media", "font", "document", "script", "xhr", "fetch", "stylesheet"):
+            r = _Route(rtype)
+            await handler(r)
+            out[rtype] = r.verdict
+        return out
+
+    with _Captured():
+        verdicts = asyncio.run(_drive_playwright())
+    blocked = {"image", "media", "font"}
+    assert all(verdicts[t] == "abort" for t in blocked), verdicts
+    assert all(v == "continue" for t, v in verdicts.items() if t not in blocked), verdicts
+
+    cdp = mock.MagicMock()
+    cdp.send = mock.AsyncMock()
+    page = mock.MagicMock()
+    page.target.createCDPSession = mock.AsyncMock(return_value=cdp)
+
+    async def _drive_pyppeteer():
+        await proxy_check.install_pyppeteer(page)
+        event, on_paused = cdp.on.call_args[0]
+        assert event == "Fetch.requestPaused", event
+        on_paused({"requestId": "r1", "resourceType": "Image"})
+        await asyncio.sleep(0)
+
+    with _Captured():
+        asyncio.run(_drive_pyppeteer())
+    calls = [c[0] for c in cdp.send.await_args_list]
+    enable = next(c[1] for c in calls if c[0] == "Fetch.enable")
+    assert sorted(pt["resourceType"] for pt in enable["patterns"]) == ["Font", "Image", "Media"], enable
+    assert ("Fetch.failRequest", {"requestId": "r1", "errorReason": "BlockedByClient"}) in calls, calls
+
+    driver = mock.MagicMock()
+    with _Captured():
+        assert proxy_check.install_selenium(driver) is True
+    sent = {c[0][0]: c[0][1] for c in driver.execute_cdp_cmd.call_args_list}
+    urls = sent["Network.setBlockedURLs"]["urls"]
+    assert "*.png" in urls and "*.woff2" in urls and "*.mp4?*" in urls, urls
+    assert not [u for u in urls if re.search(r"\.(html?|js|json|css)\b", u)], urls
+    broken = mock.MagicMock()
+    broken.execute_cdp_cmd.side_effect = RuntimeError("no CDP")
+    with _Captured():
+        assert proxy_check.install_selenium(broken) is False
+
+
+_SAVERS_ENGINE_ERR = {"playwright_scraper": "_PLAYWRIGHT_IMPORT_ERROR",
+                      "selenium_scraper": "_SELENIUM_IMPORT_ERROR",
+                      "puppeteer_scraper": "_PYPPETEER_IMPORT_ERROR"}
+# What each engine would call to start a browser; patched to record a launch.
+_SAVERS_LAUNCHER = {"playwright_scraper": "async_playwright",
+                    "selenium_scraper": "_build_driver",
+                    "puppeteer_scraper": "_launch"}
+
+
+def _savers_engines():
+    return [m for m in (playwright_scraper, selenium_scraper, puppeteer_scraper)
+            if getattr(m, _SAVERS_ENGINE_ERR[m.__name__], None) is None]
+
+
+def _savers_args(mod, out, *extra):
+    return mod.build_arg_parser().parse_args(
+        ["--origin", "LHR", "--destination", "JFK", "--depart-date", "2026-11-15",
+         "--out", out, "--retries", "0", "--retry-delay", "0"] + list(extra))
+
+
+@check("each installed engine: a 407 from the proxy exits 5 WITHOUT starting a browser, writes the attempt sidecar, no output, credential never logged")
+def _():
+    from unittest import mock
+    engines = _savers_engines()
+    if not engines:
+        print("  SKIP proxy pre-check driving: no engine driver installed here (engine-smoke runs it per driver)")
+        return
+    for mod in engines:
+        stub = _StubProxy(407)
+        launched = []
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = str(Path(td) / "out.json")
+                args = _savers_args(mod, out, "--proxy", stub.line())
+                with mock.patch.object(mod, _SAVERS_LAUNCHER[mod.__name__],
+                                       side_effect=lambda *a, **k: launched.append(1)), \
+                        _Captured() as cap:
+                    try:
+                        rc = asyncio_run_maybe(mod, args)
+                    except Exception as exc:  # fail BY NAME, not as a crash
+                        rc = f"raised {type(exc).__name__}"
+                side = Path(out + ".latest_attempt.meta.json")
+                meta = json.loads(side.read_text()) if side.exists() else {}
+                wrote = Path(out).exists() or Path(out + ".meta.json").exists()
+        finally:
+            stub.close()
+        name = mod.__name__
+        assert rc == 5 and not launched, f"{name}: a 407 must exit 5 without a browser (rc={rc}, launched={len(launched)})"
+        assert meta.get("status") == "failed" and meta.get("stop_reason") == "proxy_auth_failed", f"{name}: sidecar {meta}"
+        assert not wrote, f"{name}: a refused proxy must write no output"
+        assert _SAVERS_SECRET not in cap.text(), f"{name}: credential reached the log"
+
+
+def _savers_installed_blocking(mod, args, proxy):
+    """Drive the engine's scrape_search on fakes far enough to open its page,
+    then fail navigation. True if media blocking was installed."""
+    from unittest import mock
+    pool = _pool(proxy) if proxy else None
+    name = mod.__name__
+    nav_error = RuntimeError("stub navigation stops here")
+    if name == "playwright_scraper":
+        ctx = mock.MagicMock()
+        for attr in ("route", "add_init_script", "add_cookies", "new_page", "close"):
+            setattr(ctx, attr, mock.AsyncMock())
+        page = mock.MagicMock()
+        page.goto = mock.AsyncMock(side_effect=nav_error)
+        for attr in ("close", "content", "wait_for_timeout", "evaluate"):
+            setattr(page, attr, mock.AsyncMock())
+        ctx.new_page.return_value = page
+        browser = mock.MagicMock(contexts=[])
+        browser.new_context = mock.AsyncMock(return_value=ctx)
+        import asyncio
+        try:
+            asyncio.run(mod.scrape_search(args=args, start_url=_SAVERS_URL, browser=browser,
+                                          proxy_pool=pool, client=None, autosolve=False,
+                                          user_agent=None, stats={}))
+        except Exception:
+            pass
+        return ctx.route.await_count > 0
+    if name == "puppeteer_scraper":
+        cdp = mock.MagicMock()
+        cdp.send = mock.AsyncMock()
+        page = mock.MagicMock()
+        page.target.createCDPSession = mock.AsyncMock(return_value=cdp)
+        page.goto = mock.AsyncMock(side_effect=nav_error)
+        for attr in ("evaluateOnNewDocument", "setUserAgent", "authenticate", "setCookie",
+                     "close", "content", "evaluate", "setViewport"):
+            setattr(page, attr, mock.AsyncMock())
+        browser = mock.MagicMock()
+        browser.newPage = mock.AsyncMock(return_value=page)
+        browser.close = mock.AsyncMock()
+
+        async def fake_launch(**kw):
+            return browser
+        import asyncio
+        with mock.patch.object(mod, "_launch", fake_launch):
+            try:
+                asyncio.run(mod.scrape_search(args=args, start_url=_SAVERS_URL, proxy_pool=pool,
+                                              client=None, autosolve=False, user_agent=None, stats={}))
+            except Exception:
+                pass
+        return any(c[0][0] == "Fetch.enable" for c in cdp.send.await_args_list)
+    driver = mock.MagicMock()
+    driver.get.side_effect = nav_error
+    with mock.patch.object(mod, "_build_driver", return_value=driver):
+        try:
+            mod.scrape_search(args=args, start_url=_SAVERS_URL, proxy_pool=pool,
+                              client=None, user_agent=None, stats={})
+        except Exception:
+            pass
+    return any(c[0][0] == "Network.setBlockedURLs" for c in driver.execute_cdp_cmd.call_args_list)
+
+
+@check("each installed engine: media blocking is installed through a local proxy per the site default, never with --load-media or without a proxy, and when forced")
+def _():
+    import proxy_check
+    engines = _savers_engines()
+    if not engines:
+        print("  SKIP media blocking driving: no engine driver installed here (engine-smoke runs it per driver)")
+        return
+    proxy = proxy_pool.Proxy(host="127.0.0.1", port=1)
+    for mod in engines:
+        for label, use_proxy, extra, want in (
+                ("through a proxy", True, (), proxy_check.BLOCK_MEDIA_BY_DEFAULT),
+                ("with --load-media", True, ("--load-media",), False),
+                ("without a proxy", False, (), False),
+                ("forced, no proxy", False, ("--block-media",), True)):
+            with tempfile.TemporaryDirectory() as td, _Captured():
+                args = _savers_args(mod, str(Path(td) / "o.json"), *extra)
+                got = _savers_installed_blocking(mod, args, proxy if use_proxy else None)
+            assert got is want, f"{mod.__name__}: media blocking {label} should be {want}, got {got}"
 
 
 def run() -> int:

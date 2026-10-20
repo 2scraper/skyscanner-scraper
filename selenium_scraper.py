@@ -65,9 +65,10 @@ else:
     _SELENIUM_IMPORT_ERROR = None
 
 import env_config
+import proxy_check
 import flight_parser as fp
 from captcha_solver import detect_from_html, solve_when_blocked
-from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, sku_key as _sku_key
+from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, finish_without_fetch, sku_key as _sku_key
 from proxy_pool import Proxy, ProxyPool, ProxyParseError, is_proxy_dead_error, load_proxies
 from fingerprint_client import fetch_fingerprint, refuse_if_cdp, user_agent_from
 from scraper_api_client import TwoCaptchaAuthError, TwoCaptchaClient, TwoCaptchaError
@@ -177,6 +178,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--scraper-api-timeout", type=int, default=60, help="Seconds 2Captcha itself waits for the target page to finish loading (1-120, their limit)")
     p.add_argument("--scraper-api-url", default=None, help="Override the Scraper API base URL (testing only)")
+    proxy_check.add_media_flags(p)
     p.add_argument("--cdp-endpoint", default=None,
                     help="NOTE: refused if it carries credentials — Selenium cannot authenticate a remote CDP session")
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="Retry a blocked run this many times over --cdp-endpoint (parity flag — see this module's docstring: weaker here than on playwright/puppeteer, since Selenium reconnects to the SAME browser session, not a fresh one). Has no effect without --cdp-endpoint.")
@@ -503,6 +505,8 @@ def scrape_search(
     proxy = proxy_pool.next() if proxy_pool else None
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
     driver = _build_driver(headless=args.headless, proxy=proxy, cdp_endpoint=args.cdp_endpoint, user_agent=user_agent, stealth=args.stealth)
+    if proxy_check.block_media(args, proxy, remote=bool(args.cdp_endpoint)):
+        proxy_check.install_selenium(driver)
     _apply_cookies(driver, cookies, start_url)
     capture = fp.SearchApiCapture()
     pending_requests: set = set()
@@ -819,6 +823,16 @@ def run(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
     proxy_pool = ProxyPool(proxies, shuffle=args.proxy_shuffle, block_retries=args.proxy_block_retries) if proxies else None
+    # One request through the proxy before a browser exists: a 407 or 402
+    # from the gateway ends the run here, in seconds, instead of surfacing
+    # as a navigation timeout after every retry. Not over --cdp-endpoint,
+    # where the local proxy is ignored.
+    refused = proxy_check.gate(None if args.cdp_endpoint else proxy_pool, start_url)
+    if refused:
+        return finish_without_fetch(
+            args.out, stop_reason=refused.stop_reason, engine=ENGINE_NAME,
+            url=start_url, pages_requested=args.max_scrolls, started_at=started_at)
+
     if args.cdp_endpoint and proxy_pool is not None:
         log.warning("Ignoring --proxy: a --cdp-endpoint session already carries its own exit IP.")
         proxy_pool = None

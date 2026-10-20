@@ -158,6 +158,11 @@ class ProxyPool:
     def _live_proxies(self) -> List[Proxy]:
         return [p for p in self._proxies if not self._dead[id(p)]]
 
+    def peek(self) -> Optional[Proxy]:
+        """The exit `next()` would hand out, without moving the cursor."""
+        live = self._live_proxies()
+        return live[self._cursor % len(live)] if live else None
+
     def next(self) -> Optional[Proxy]:
         live = self._live_proxies()
         if not live:
