@@ -9,6 +9,36 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+> **Behaviour change.** A run through a local proxy (`--proxy`,
+> `--proxy-file`, `SKYSCANNER_PROXY`) now makes one pre-check request before
+> starting a browser. A proxy that answers **HTTP 407** or **402** ends the
+> run with **exit 5** and `<out>.latest_attempt.meta.json` (`status: failed`,
+> `stop_reason: proxy_auth_failed` / `proxy_balance_exhausted`) instead of
+> timing out on every retry. Runs without a proxy, over `--cdp-endpoint` or
+> with `--scraper-api` are unchanged.
+
+### Added
+
+- `proxy_check.py`: the proxy pre-check (one CONNECT plus `HEAD /robots.txt`
+  on the target host, no third-party service) for all three engines. The
+  407 message names `SKYSCANNER_PROXY` and says the gateway refused the
+  credential (or the traffic balance is exhausted); a 402 says the proxy
+  traffic/balance is exhausted. Neither prints the login or password. A
+  proxy that does not answer keeps the existing retry and rotation.
+- `--block-media` on all three engines: abort image, video/audio and font
+  requests to save proxy traffic. Off by default on this site (PerimeterX
+  runs in the page and the effect is not measured); `--load-media` and
+  `SKYSCANNER_LOAD_MEDIA` keep media on.
+- Offline checks: a stub proxy that answers 407/402/200 or nothing, each
+  engine driven to exit 5 without a browser on a 407, the attempt sidecar,
+  the Playwright route handler, the pyppeteer Fetch patterns, the Selenium
+  blocked-URL list, and when each engine installs blocking.
+
+### Fixed
+
+- The offline suite's fingerprint check made a real request to the
+  Fingerprint API with its fake key; that call now runs inside the mock.
+
 ### Changed
 
 - CI only: both canary jobs bill a paid route (`SKYSCANNER_PROXY`,

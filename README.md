@@ -175,7 +175,8 @@ places they genuinely can't behave the same as Playwright.
 --twocaptcha-key --captcha-api --solve-captcha --min-score --cdp-endpoint
 --cdp-block-retries --cookies-file --fingerprint --fp-tags --fp-country
 --stealth --scraper-api --scraper-api-timeout --scraper-api-url
---allow-empty --dump-html --headless/--headful --wait-for-human`
+--allow-empty --dump-html --headless/--headful --wait-for-human
+--load-media --block-media`
 
 `--cdp-block-retries`, `--cookies-file`, `--stealth`, and `--scraper-api`
 are the four non-honest-messaging mitigations for the confirmed
@@ -307,7 +308,9 @@ LHR→JFK, 2026-09-29) by the same parser and writer a run uses.
 
 **Exit codes**: `0` complete · `1` crash · `2` bad usage · `3` blocked ·
 `4` zero itineraries (and nothing was written) · `5` the content was never
-obtained (remote API error, navigation failure, dead proxy), or the search
+obtained (remote API error, navigation failure, dead proxy, or a proxy that
+refused the credential or the balance before the run began: `stop_reason:
+proxy_auth_failed` / `proxy_balance_exhausted`), or the search
 API stated itineraries and the parser read none of them (`status` and
 `stop_reason: parser_found_nothing` — a parser problem, not an empty
 route) · `6` partial.
@@ -321,7 +324,9 @@ the search API still said `incomplete` is `partial` (`stop_reason:
 search_incomplete`). A failed/empty/blocked/never-obtained run writes no
 sidecar and no output at all, so it can never overwrite a previous good
 run (`--allow-empty` opts out of the "don't write an empty result" half of
-that guard only).
+that guard only). The one exception is a run the proxy pre-check stopped
+(see "Proxy traffic savers"): it writes `<out>.latest_attempt.meta.json`, a
+separate file, and leaves `<out>.meta.json` and the output alone.
 
 Output files and the sidecar are written to a temporary file in the same
 directory and renamed into place, so a crash or a full disk mid-write
@@ -372,6 +377,37 @@ drivers, not the site):
   pyppeteer declare mutually unsatisfiable `pyee` pins, and pyppeteer
   collides with Selenium's `urllib3` pin. Use a venv per engine, same as
   `.github/workflows/tests.yml`'s `engine-smoke` job.
+
+## Proxy traffic savers
+
+A proxy is billed by traffic. A run through `--proxy` / `--proxy-file` /
+`SKYSCANNER_PROXY` (not `--cdp-endpoint`, not `--scraper-api`) does this:
+
+- **One pre-check before any browser starts**, in all three engines (and so
+  in every `batch_scraper.py` route that falls back to the proxy): a CONNECT
+  through the proxy to the target host and `HEAD /robots.txt` inside the
+  tunnel. Chromium reports a proxy's HTTP 407 as a navigation timeout, so a
+  wrong or exhausted credential used to spend every retry and rotation
+  before ending as a navigation failure. Now a **407** (the gateway refused
+  the credential, or the traffic balance is exhausted) or a **402** (proxy
+  traffic/balance exhausted) ends the run in seconds with **exit 5** and
+  `<out>.latest_attempt.meta.json` saying `status: failed`, `stop_reason:
+  proxy_auth_failed` (or `proxy_balance_exhausted`). The message names
+  `SKYSCANNER_PROXY` and never prints the login or password. A proxy that
+  does not answer at all keeps the existing behaviour: the browser makes its
+  own attempt and the dead-proxy rotation below applies.
+- **Media blocking is opt-in here: `--block-media`.** It aborts image,
+  video/audio and font requests (Playwright by resource type, pyppeteer
+  through CDP's Fetch domain, Selenium by file extension with CDP
+  `Network.setBlockedURLs`). The flight data comes from the search-API XHR,
+  not from any of those. It is **not** the default on this site because
+  skyscanner.com is behind PerimeterX, whose sensor runs in the page, and
+  the effect of a browser that never fetches images and fonts on the
+  challenge rate is not measured: on 2026-10-20 a free run from a
+  datacentre address was challenged with media loaded and with it blocked,
+  so there was no served search to compare. `--load-media` (or
+  `SKYSCANNER_LOAD_MEDIA=1`) keeps media on. Neither does anything with
+  `--cdp-endpoint`.
 
 ## Known limitations
 
