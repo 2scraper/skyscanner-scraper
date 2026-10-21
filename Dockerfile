@@ -23,7 +23,7 @@ COPY env_config.py proxy_pool.py output_writer.py captcha_solver.py \
      fingerprint_client.py scraper_api_client.py diff_runs.py \
      flight_parser.py playwright_scraper.py puppeteer_scraper.py \
      selenium_scraper.py batch_scraper.py smoke_test.py repo_scan.py \
-     proxy_check.py ./
+     proxy_check.py proxy_meter.py ./
 # smoke_test.py also reads these straight off disk (the ENV_KEYS<->
 # .env.example sync check and the sample-output-schema check) — missing
 # any one crashes the build the same way the two .py files above would.

@@ -66,6 +66,7 @@ else:
 
 import env_config
 import proxy_check
+import proxy_meter
 import flight_parser as fp
 from captcha_solver import detect_from_html, solve_when_blocked
 from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, finish_without_fetch, sku_key as _sku_key
@@ -179,6 +180,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--scraper-api-timeout", type=int, default=60, help="Seconds 2Captcha itself waits for the target page to finish loading (1-120, their limit)")
     p.add_argument("--scraper-api-url", default=None, help="Override the Scraper API base URL (testing only)")
     proxy_check.add_media_flags(p)
+    proxy_meter.add_budget_flag(p)
     p.add_argument("--cdp-endpoint", default=None,
                     help="NOTE: refused if it carries credentials — Selenium cannot authenticate a remote CDP session")
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="Retry a blocked run this many times over --cdp-endpoint (parity flag — see this module's docstring: weaker here than on playwright/puppeteer, since Selenium reconnects to the SAME browser session, not a fresh one). Has no effect without --cdp-endpoint.")
@@ -457,11 +459,9 @@ def _drain_search_api_responses(driver, capture: "fp.SearchApiCapture", pending:
     `capture`: responseReceived marks the request, loadingFinished means
     its body can be fetched over CDP. `pending` carries requests whose body
     wasn't finished yet across calls. Never raises."""
-    try:
-        entries = driver.get_log("performance")
-    except Exception as exc:  # noqa: BLE001 — e.g. a driver without the log enabled
-        log.debug("Performance log unavailable, search-API capture off: %s", exc)
-        return
+    # Through proxy_meter: the log is drained on read, and the proxy meter
+    # counts bytes from the same entries.
+    entries = proxy_meter.selenium_log(driver)
     for entry in entries:
         try:
             msg = json.loads(entry["message"])["message"]
@@ -505,6 +505,9 @@ def scrape_search(
     proxy = proxy_pool.next() if proxy_pool else None
     log.info("Using proxy %s", proxy.masked() if proxy else "(no local proxy pool — direct connection, or a --cdp-endpoint session providing its own exit)")
     driver = _build_driver(headless=args.headless, proxy=proxy, cdp_endpoint=args.cdp_endpoint, user_agent=user_agent, stealth=args.stealth)
+    # The meter reads Chrome's performance log, which _build_driver already
+    # enables for the search-API capture; both read it through proxy_meter.
+    proxy_meter.install_selenium(driver, proxy_meter.of(args))
     if proxy_check.block_media(args, proxy, remote=bool(args.cdp_endpoint)):
         proxy_check.install_selenium(driver)
     _apply_cookies(driver, cookies, start_url)
@@ -514,6 +517,13 @@ def scrape_search(
     last_error = None
     status = None
     for attempt in range(args.retries + 1):
+        # Feeds the proxy meter too; read through the capture so no
+        # search-API response is lost to the meter's read.
+        _drain_search_api_responses(driver, capture, pending_requests)
+        if proxy_meter.over(args):
+            # The budget is spent: no navigation, and no retry of one.
+            last_error = "proxy budget exceeded (--proxy-budget-mb)"
+            break
         try:
             driver.set_page_load_timeout(NAV_TIMEOUT_S)
             driver.get(start_url)
@@ -543,6 +553,7 @@ def scrape_search(
                 time.sleep(args.retry_delay)
 
     if last_error is not None:
+        _drain_search_api_responses(driver, capture, pending_requests)
         driver.quit()
         log.error("Search page permanently failed to load: %s", last_error)
         return [], False, True, 0, False
@@ -649,6 +660,11 @@ def scrape_search(
         if round_num >= args.max_scrolls:
             break
 
+        _drain_search_api_responses(driver, capture, pending_requests)
+        if proxy_meter.over(args):
+            log.warning("Proxy budget exceeded — no further scrolling; keeping the %d itineraries "
+                        "collected so far.", len(merged))
+            break
         try:
             driver.execute_script("window.scrollBy(0, 4000);")
         except WebDriverException as exc:
@@ -664,6 +680,8 @@ def scrape_search(
     if args.dump_html:
         Path(_dump_path(args.out)).write_text(driver.page_source, encoding="utf-8")
 
+    # The last round's traffic is still in the performance log.
+    _drain_search_api_responses(driver, capture, pending_requests)
     driver.quit()
     if blocked and merged:
         # Detected ≠ blocking. A challenge marker (or an error
@@ -832,6 +850,9 @@ def run(args: argparse.Namespace) -> int:
         return finish_without_fetch(
             args.out, stop_reason=refused.stop_reason, engine=ENGINE_NAME,
             url=start_url, pages_requested=args.max_scrolls, started_at=started_at)
+    # Metered only through a local proxy; None over --cdp-endpoint.
+    proxy_meter.start(args, None if args.cdp_endpoint else proxy_pool,
+                      remote=bool(args.cdp_endpoint))
 
     if args.cdp_endpoint and proxy_pool is not None:
         log.warning("Ignoring --proxy: a --cdp-endpoint session already carries its own exit IP.")
@@ -893,7 +914,8 @@ def run(args: argparse.Namespace) -> int:
                     args=args, start_url=start_url, proxy_pool=proxy_pool, client=client,
                     user_agent=user_agent, cookies=cookies, stats=search_stats,
                 )
-                if not (remote_api_error and len(search_stats.get("dead_proxies", [])) > dead_before):
+                if proxy_meter.over(args) or not (
+                        remote_api_error and len(search_stats.get("dead_proxies", [])) > dead_before):
                     break
                 if rotation < rotations - 1:
                     log.warning("Rotating to the next proxy with a fresh browser (%d/%d).", rotation + 2, rotations)
@@ -924,7 +946,7 @@ def run(args: argparse.Namespace) -> int:
         pages_requested=args.max_scrolls, pages_completed=completed_rounds, failed_pages=failed_pages,
         blocked=blocked, remote_api_error=remote_api_error, allow_empty=args.allow_empty,
         started_at=started_at, price_confirmed_pct=price_confirmed_pct,
-        extra_meta=search_stats or None,
+        extra_meta=proxy_meter.finish(args, search_stats) or None,
         incomplete=bool(search_stats.get("search_incomplete")),
         stop_reason=("search_incomplete" if search_stats.get("search_incomplete")
                      else "max_results" if search_stats.get("capped_by_max_results") else None),

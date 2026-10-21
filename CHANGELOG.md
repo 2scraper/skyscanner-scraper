@@ -16,8 +16,36 @@ rather than being a silent violation of that.
 > `stop_reason: proxy_auth_failed` / `proxy_balance_exhausted`) instead of
 > timing out on every retry. Runs without a proxy, over `--cdp-endpoint` or
 > with `--scraper-api` are unchanged.
+>
+> **Behaviour change.** A run through a local proxy now **stops at 10 MB of
+> proxy traffic** by default (`--proxy-budget-mb`, `0` = no cap): it keeps
+> its itineraries and exits **6** (**5** with none) with `stop_reason:
+> proxy_budget_exceeded`, and it always writes
+> `<out>.latest_attempt.meta.json`. `batch_scraper.py` applies one such
+> budget to the whole batch.
 
 ### Added
+
+- `proxy_meter.py`: per-run proxy traffic meter and budget, in all three
+  engines and `batch_scraper.py`, only through a local proxy. Playwright
+  sums `request.sizes()`; pyppeteer and Selenium count CDP
+  `Network.loadingFinished.encodedDataLength` plus each request's own size.
+  Over budget, Playwright aborts new requests in a route and
+  pyppeteer/Selenium block every URL over CDP; the engine stops before its
+  next navigation, retry, rotation or scroll. New sidecar fields
+  `proxy_bytes`, `proxy_budget_bytes`, `proxy_budget_exceeded`; a closing
+  log line `Proxy traffic: X.X MB of Y MB budget`. `--proxy-budget-mb` and
+  `SKYSCANNER_PROXY_BUDGET_MB` (in `.env.example`).
+- CI only: the proxy canary passes `--proxy-budget-mb 10`, writes its proxy
+  traffic to the step summary, and fails with
+  `::error::stopped: proxy budget 10 MB exceeded` when the cap was hit
+  (`.github/proxy_traffic.py`).
+- Offline checks: the meter against known CDP and Playwright sizes, an HTTP
+  client through a byte-counting stub proxy, the sidecars and exit codes
+  over budget, every engine driven past the budget, the batch-wide budget,
+  the canary step and its summary script. An opt-in real-browser check
+  (`PROXY_METER_BROWSER=1`) compares each driver's count with a stub
+  proxy's.
 
 - `proxy_check.py`: the proxy pre-check (one CONNECT plus `HEAD /robots.txt`
   on the target host, no third-party service) for all three engines. The
