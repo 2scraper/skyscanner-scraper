@@ -52,8 +52,17 @@ jobs:
           set +e
           python3 playwright_scraper.py --origin LHR --destination JFK \
             --depart-date "$(date -u -d '+30 days' +%Y-%m-%d)" \
-            --max-results 1000 --format json --out canary_out.json --dump-html
+            --max-results 1000 --format json --out canary_out.json --dump-html \
+            --proxy-budget-mb 10
           echo "exit_code=$?" >> "$GITHUB_ENV"
+      # The run meters what it sends through SKYSCANNER_PROXY and stops at
+      # --proxy-budget-mb 10. This puts the figure in the step summary and
+      # fails the job when the cap was hit, so a search that has grown heavy
+      # is a red run rather than a quietly larger bill. (The Scraping
+      # Browser job below has no local proxy and is not metered.)
+      - name: Proxy traffic of the run
+        if: ${{ !cancelled() && env.HAS_PROXY == 'true' }}
+        run: python3 .github/proxy_traffic.py "canary-proxy" canary_out.json
       - name: Assert the run
         if: env.HAS_PROXY == 'true'
         run: python3 .github/canary_assert.py canary_out.json "$exit_code"

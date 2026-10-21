@@ -59,6 +59,7 @@ else:
 
 import env_config
 import proxy_check
+import proxy_meter
 import flight_parser as fp
 from captcha_solver import detect_from_html, solve_when_blocked
 from output_writer import EXIT_BAD_USAGE, EXIT_CRASH, Product, finish_run, finish_without_fetch, sku_key as _sku_key
@@ -158,6 +159,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--scraper-api-timeout", type=int, default=60, help="Seconds 2Captcha itself waits for the target page to finish loading (1-120, their limit)")
     p.add_argument("--scraper-api-url", default=None, help="Override the Scraper API base URL (testing only)")
     proxy_check.add_media_flags(p)
+    proxy_meter.add_budget_flag(p)
     p.add_argument("--cdp-endpoint", default=None)
     p.add_argument("--cdp-block-retries", type=_nonnegative_int, default=2, help="On a --cdp-endpoint run that comes back blocked (e.g. a PerimeterX challenge 2Captcha cannot solve — see captcha_solver.py), reconnect for a fresh Scraping Browser session and retry this many times before giving up. Has no effect without --cdp-endpoint.")
     p.add_argument("--cookies-file", default=None, help="Path to a JSON array of cookies from a session a HUMAN solved manually — loaded before navigating. A way to reuse a person's own solve, never to solve a challenge automatically.")
@@ -406,6 +408,7 @@ async def scrape_search(
     page = await browser.newPage()
     if proxy_check.block_media(args, proxy, remote=bool(args.cdp_endpoint)):
         await proxy_check.install_pyppeteer(page)
+    await proxy_meter.install_pyppeteer(page, proxy_meter.of(args))
     if args.stealth:
         # pyppeteer's equivalent of Playwright's context.add_init_script()
         # / Selenium's Page.addScriptToEvaluateOnNewDocument CDP command —
@@ -449,6 +452,10 @@ async def scrape_search(
     last_error = None
     status = None
     for attempt in range(args.retries + 1):
+        if proxy_meter.over(args):
+            # The budget is spent: no navigation, and no retry of one.
+            last_error = "proxy budget exceeded (--proxy-budget-mb)"
+            break
         try:
             response = await page.goto(start_url, {"waitUntil": "domcontentloaded", "timeout": NAV_TIMEOUT_MS})
             await asyncio.sleep(READINESS_WAIT_S)
@@ -578,6 +585,10 @@ async def scrape_search(
         if round_num >= args.max_scrolls:
             break
 
+        if proxy_meter.over(args):
+            log.warning("Proxy budget exceeded — no further scrolling; keeping the %d itineraries "
+                        "collected so far.", len(merged))
+            break
         try:
             await page.evaluate("window.scrollBy(0, 4000);")
         except Exception as exc:  # noqa: BLE001 — a scroll failure ends the loop, not the run
@@ -754,6 +765,9 @@ async def run(args: argparse.Namespace) -> int:
         return finish_without_fetch(
             args.out, stop_reason=refused.stop_reason, engine=ENGINE_NAME,
             url=start_url, pages_requested=args.max_scrolls, started_at=started_at)
+    # Metered only through a local proxy; None over --cdp-endpoint.
+    proxy_meter.start(args, None if args.cdp_endpoint else proxy_pool,
+                      remote=bool(args.cdp_endpoint))
 
     if args.cdp_endpoint and proxy_pool is not None:
         log.warning("Ignoring --proxy: a --cdp-endpoint session already carries its own exit IP.")
@@ -820,7 +834,8 @@ async def run(args: argparse.Namespace) -> int:
                     args=args, start_url=start_url, proxy_pool=proxy_pool, client=client, autosolve=autosolve,
                     user_agent=user_agent, cookies=cookies, stats=search_stats,
                 )
-                if not (remote_api_error and len(search_stats.get("dead_proxies", [])) > dead_before):
+                if proxy_meter.over(args) or not (
+                        remote_api_error and len(search_stats.get("dead_proxies", [])) > dead_before):
                     break
                 if rotation < rotations - 1:
                     log.warning("Rotating to the next proxy with a fresh browser (%d/%d).", rotation + 2, rotations)
@@ -851,7 +866,7 @@ async def run(args: argparse.Namespace) -> int:
         pages_requested=args.max_scrolls, pages_completed=completed_rounds, failed_pages=failed_pages,
         blocked=blocked, remote_api_error=remote_api_error, allow_empty=args.allow_empty,
         started_at=started_at, price_confirmed_pct=price_confirmed_pct,
-        extra_meta=search_stats or None,
+        extra_meta=proxy_meter.finish(args, search_stats) or None,
         incomplete=bool(search_stats.get("search_incomplete")),
         stop_reason=("search_incomplete" if search_stats.get("search_incomplete")
                      else "max_results" if search_stats.get("capped_by_max_results") else None),

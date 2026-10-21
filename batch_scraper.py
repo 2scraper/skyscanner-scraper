@@ -52,6 +52,7 @@ from typing import Callable, Dict, List, Optional
 
 import env_config
 import playwright_scraper
+import proxy_meter
 from output_writer import (
     EXIT_BAD_USAGE, EXIT_BLOCKED, EXIT_CRASH, EXIT_OK, EXIT_PARTIAL,
     EXIT_REMOTE_API_ERROR, EXIT_ZERO_PRODUCTS, Product, finish_run, merge_pages,
@@ -151,6 +152,46 @@ def fallback_configured(dotenv_path: Optional[str] = None) -> bool:
     return False
 
 
+class BatchBudget:
+    """The proxy budget for the WHOLE batch, not per route.
+
+    Each route's engine run meters itself; this hands it what is left
+    (`--proxy-budget-mb <remaining>`) and adds up what its attempt sidecar
+    says it spent. Only a run through SKYSCANNER_PROXY is metered — the
+    local-Chrome attempt and the Scraping Browser fallback have no local
+    proxy and record nothing, so they cost nothing here."""
+
+    def __init__(self, budget_mb: float):
+        self.budget_bytes = int(round(budget_mb * proxy_meter.MB)) if budget_mb > 0 else None
+        self.spent = 0
+        self.metered = False
+
+    @property
+    def exceeded(self) -> bool:
+        return self.budget_bytes is not None and self.spent > self.budget_bytes
+
+    def flag(self) -> List[str]:
+        if self.budget_bytes is None:
+            return ["--proxy-budget-mb", "0"]
+        left = max(self.budget_bytes - self.spent, 1)
+        return ["--proxy-budget-mb", f"{left / proxy_meter.MB:.6f}"]
+
+    def record(self, out: str) -> None:
+        try:
+            meta = json.loads(Path(out + ".latest_attempt.meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if "proxy_bytes" in meta:
+            self.metered = True
+            self.spent += int(meta.get("proxy_bytes") or 0)
+
+    def sidecar(self) -> Dict[str, object]:
+        if not self.metered:
+            return {}
+        return {"proxy_bytes": self.spent, "proxy_budget_bytes": self.budget_bytes,
+                "proxy_budget_exceeded": self.exceeded}
+
+
 @dataclass
 class RouteOutcome:
     route: str
@@ -172,6 +213,7 @@ def _run_engine(argv: List[str]) -> int:
 def scrape_route(
     route: Dict[str, str], *, args: argparse.Namespace, workdir: str,
     run_engine: Callable[[List[str]], int] = _run_engine,
+    budget: Optional[BatchBudget] = None,
 ) -> tuple:
     """Returns (RouteOutcome, products). `run_engine` is injectable for tests."""
     label = route_label(route)
@@ -179,7 +221,12 @@ def scrape_route(
 
     def attempt(via: str, extra: List[str]):
         out = str(Path(workdir) / f"route_{len(attempts)}_{via}_{abs(hash(label))}.json")
-        code = run_engine(engine_argv(route, out=out, max_results=args.max_results) + extra)
+        argv = engine_argv(route, out=out, max_results=args.max_results) + extra
+        if budget is not None:
+            argv += budget.flag()
+        code = run_engine(argv)
+        if budget is not None:
+            budget.record(out)
         wrote = code in (EXIT_OK, EXIT_PARTIAL) and Path(out).exists()
         rows = json.loads(Path(out).read_text(encoding="utf-8")) if wrote else []
         attempts.append({"via": via, "exit_code": code, "rows": len(rows)})
@@ -197,7 +244,9 @@ def scrape_route(
         log.warning("[%s] local Chrome at %s is not available.", label, args.local_cdp)
         attempts.append({"via": "local", "exit_code": None, "rows": 0, "skipped": "unreachable"})
 
-    if code in FALLBACK_ON and args.fallback:
+    if code in FALLBACK_ON and args.fallback and budget is not None and budget.exceeded:
+        log.warning("[%s] proxy budget spent — no 2Captcha fallback for this route.", label)
+    elif code in FALLBACK_ON and args.fallback:
         if fallback_configured():
             log.info("[%s] falling back to 2Captcha (.env: Scraping Browser / proxy).", label)
             code, rows = attempt("2captcha", ["--cdp-block-retries", str(args.cdp_block_retries)])
@@ -245,6 +294,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cdp-block-retries", type=int, default=2, help="Fresh Scraping Browser sessions to try on the fallback")
     p.add_argument("--route-delay", type=float, default=5.0, help="Seconds between routes (be gentle)")
     p.add_argument("--allow-empty", action="store_true", help="Write the (empty) output even when no route produced a row")
+    proxy_meter.add_budget_flag(p)
     return p
 
 
@@ -261,14 +311,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_BAD_USAGE
 
+    try:
+        args = env_config.apply_env(args)
+        budget = BatchBudget(proxy_meter.budget_mb(args))
+    except SystemExit as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_BAD_USAGE
+
     started_at = time.time()
     outcomes: List[RouteOutcome] = []
     per_route: List[List[Product]] = []
     with tempfile.TemporaryDirectory(prefix="skyscanner_batch_") as workdir:
         for i, route in enumerate(routes):
+            if budget.exceeded:
+                # Never carry on past the cap: the remaining routes are
+                # not attempted, and the batch reports proxy_budget_exceeded.
+                log.error("Proxy budget exceeded (%s used) — %d route(s) not attempted.",
+                          proxy_meter.fmt_mb(budget.spent), len(routes) - i)
+                break
             if i:
                 time.sleep(args.route_delay)
-            outcome, rows = scrape_route(route, args=args, workdir=workdir)
+            outcome, rows = scrape_route(route, args=args, workdir=workdir, budget=budget)
             outcomes.append(outcome)
             per_route.append(rows)
 
@@ -277,9 +340,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     code = finish_run(
         products=products, out_path=args.out, fmt=args.format, engine="batch:playwright",
         url=args.routes_file, allow_empty=args.allow_empty, started_at=started_at,
-        extra_meta={"per_route": [asdict(o) for o in outcomes]},
+        extra_meta={"per_route": [asdict(o) for o in outcomes], "routes_requested": len(routes),
+                    **budget.sidecar()},
         **batch_outcome(outcomes, have_rows=bool(products)),
     )
+    if budget.metered:
+        cap = proxy_meter.fmt_mb(budget.budget_bytes) + " budget" if budget.budget_bytes else "no budget"
+        (log.warning if budget.exceeded else log.info)(
+            "Proxy traffic: %s of %s", proxy_meter.fmt_mb(budget.spent), cap)
     for o in outcomes:
         print(f"{o.route:32} exit {o.exit_code}  via {o.via:8}  {o.rows} itineraries", file=sys.stderr)
     ok = sum(o.exit_code == EXIT_OK for o in outcomes)

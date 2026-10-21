@@ -313,7 +313,9 @@ refused the credential or the balance before the run began: `stop_reason:
 proxy_auth_failed` / `proxy_balance_exhausted`), or the search
 API stated itineraries and the parser read none of them (`status` and
 `stop_reason: parser_found_nothing` — a parser problem, not an empty
-route) · `6` partial.
+route), or the proxy budget was spent before any itinerary
+(`stop_reason: proxy_budget_exceeded`) · `6` partial (including a run
+`--proxy-budget-mb` stopped after collecting itineraries).
 Every completed/partial run writes a `<out>.meta.json` sidecar with
 `status`, `stop_reason`, `pages_completed` (scroll rounds, here),
 `failed_pages`, `price_confirmed_pct`, and the site's own arithmetic:
@@ -326,7 +328,9 @@ sidecar and no output at all, so it can never overwrite a previous good
 run (`--allow-empty` opts out of the "don't write an empty result" half of
 that guard only). The one exception is a run the proxy pre-check stopped
 (see "Proxy traffic savers"): it writes `<out>.latest_attempt.meta.json`, a
-separate file, and leaves `<out>.meta.json` and the output alone.
+separate file, and leaves `<out>.meta.json` and the output alone. A run
+through a local proxy always writes that file too, with its proxy traffic,
+rows or not.
 
 Output files and the sidecar are written to a temporary file in the same
 directory and renamed into place, so a crash or a full disk mid-write
@@ -408,6 +412,37 @@ A proxy is billed by traffic. A run through `--proxy` / `--proxy-file` /
   so there was no served search to compare. `--load-media` (or
   `SKYSCANNER_LOAD_MEDIA=1`) keeps media on. Neither does anything with
   `--cdp-endpoint`.
+- **Every run is metered and capped.** `--proxy-budget-mb` (default **10**,
+  `0` = no cap, also `SKYSCANNER_PROXY_BUDGET_MB`). Once more than that has
+  gone through the proxy, further requests are refused, the engine does not
+  navigate, retry or scroll again, keeps the itineraries it has and exits
+  **6** (or **5** with none), `stop_reason: proxy_budget_exceeded`. It never
+  carries on past the cap, and a dead-proxy rotation does not start a fresh
+  budget. The sidecars (`<out>.meta.json`, and
+  `<out>.latest_attempt.meta.json`, which every metered run writes) carry
+  `proxy_bytes`, `proxy_budget_bytes` (`null` with no cap) and
+  `proxy_budget_exceeded`, and the log ends with
+  `Proxy traffic: X.X MB of Y MB budget`. `batch_scraper.py` takes the same
+  flag as ONE budget for the whole batch: each route's run is handed what is
+  left, and once it is spent the remaining routes are not run.
+
+How the bytes are counted, per engine: Playwright (async API) sums
+`request.sizes()` (request headers + body, response headers + body) of
+every finished or failed request; pyppeteer reads CDP
+`Network.loadingFinished.encodedDataLength` (bytes received, headers
+included) plus each request's line, headers and body from
+`Network.requestWillBeSent`; Selenium reads the same CDP events from
+chromedriver's performance log (which it already reads for the search-API
+XHR) after the navigation and every scroll round. Over budget, Playwright
+aborts new requests in a route and pyppeteer/Selenium block every URL over
+CDP. The figure is an **estimate of the payload through the tunnel**: TLS,
+the CONNECT exchange and connections the browser opens for itself are not
+visible to any engine and add a few percent; the pre-check (under 1 KB) is
+not counted. Measured 2026-10-21 against a local stub proxy that counted
+every byte it carried (a 60 kB page, a 30 kB stylesheet, a 90 kB script):
+Playwright within 0.2%, pyppeteer 0.6%, Selenium 0.7%. A megabyte here is
+10^6 bytes. Nothing is metered without a proxy, over `--cdp-endpoint` or
+with `--scraper-api`.
 
 ## Known limitations
 

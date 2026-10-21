@@ -268,6 +268,7 @@ def write_meta(
     started_at: float,
     finished_at: Optional[float] = None,
     extra: Optional[dict] = None,
+    path: Optional[str] = None,
 ) -> None:
     meta = {
         "status": status,
@@ -284,7 +285,7 @@ def write_meta(
     }
     if extra:
         meta.update(extra)
-    with _atomic(meta_path_for(out_path)) as f:
+    with _atomic(path or meta_path_for(out_path)) as f:
         f.write(json.dumps(meta, ensure_ascii=False, indent=2))
 
 
@@ -381,7 +382,16 @@ def finish_run(
     # blocked partway through.
     # 5 means "the content was never obtained" — a run that gathered rows
     # and THEN hit a remote error is partial (6), not 5.
-    if remote_api_error and zero_products:
+    # A run stopped by --proxy-budget-mb outranks everything below: the
+    # requests after the cap were refused, so whatever the page looked like
+    # then (an error, a challenge, a short list) is not evidence about the
+    # site. Rows kept → partial (6); none → content not obtained (5).
+    over_budget = bool((extra_meta or {}).get("proxy_budget_exceeded"))
+    if over_budget:
+        stop_reason = "proxy_budget_exceeded"
+        status, exit_code = (("partial", EXIT_PARTIAL) if products
+                             else ("failed", EXIT_REMOTE_API_ERROR))
+    elif remote_api_error and zero_products:
         status, exit_code = "remote_api_error", EXIT_REMOTE_API_ERROR
     elif remote_api_error:
         status, exit_code = "partial", EXIT_PARTIAL
@@ -407,7 +417,20 @@ def finish_run(
     # would contradict that good data rather than describe it. The
     # engine's own logs carry the diagnostic detail — that's what a
     # failed run's output is FOR, not this file.
+    meta_kwargs = dict(
+        status=status, stop_reason=stop_reason or status, engine=engine, url=url,
+        pages_requested=pages_requested, pages_completed=pages_completed,
+        failed_pages=failed_pages, product_count=len(products),
+        price_confirmed_pct=price_confirmed_pct, started_at=started_at,
+    )
+    # A metered (proxied) run also records itself in the attempt sidecar,
+    # every time: a run that wrote no rows leaves no `<out>.meta.json`, and
+    # what it spent through the proxy must still be on disk somewhere.
+    metered = bool(extra_meta) and "proxy_bytes" in extra_meta
     if zero_products and not allow_empty:
+        if metered:
+            write_meta(out_path, path=f"{out_path}{ATTEMPT_META_SUFFIX}",
+                       extra=extra_meta, **meta_kwargs)
         return exit_code
 
     escaped = write_output(products, out_path, fmt)
@@ -415,11 +438,8 @@ def finish_run(
         # Merged UNDER the caller's extra: housekeeping never overwrites
         # site data that happens to share a key.
         extra_meta = {"csv_cells_escaped": escaped, **(extra_meta or {})}
-    write_meta(
-        out_path, status=status, stop_reason=stop_reason or status, engine=engine, url=url,
-        pages_requested=pages_requested, pages_completed=pages_completed,
-        failed_pages=failed_pages, product_count=len(products),
-        price_confirmed_pct=price_confirmed_pct, started_at=started_at,
-        extra=extra_meta,
-    )
+    write_meta(out_path, extra=extra_meta, **meta_kwargs)
+    if metered:
+        write_meta(out_path, path=f"{out_path}{ATTEMPT_META_SUFFIX}",
+                   extra=extra_meta, **meta_kwargs)
     return exit_code

@@ -2081,6 +2081,949 @@ def _():
             assert got is want, f"{mod.__name__}: media blocking {label} should be {want}, got {got}"
 
 
+
+# --------------------------------------------------------------------------- #
+# Proxy traffic meter and budget (proxy_meter.py). The shared unit checks are
+# written as `_mcheck(label, condition)` calls inside grouped functions; each
+# one lands in RESULTS like any @check above.
+# --------------------------------------------------------------------------- #
+import contextlib as _contextlib
+import io as _io
+
+
+def _mcheck(label, condition):
+    RESULTS.append((label, bool(condition), "" if condition else "condition was false"))
+    print(("  ok    " if condition else "  FAIL  ") + label)
+    return bool(condition)
+
+
+def _mgroup(title):
+    print(f"== {title}")
+
+
+@_contextlib.contextmanager
+def _captured_output():
+    with _Captured() as cap:
+        yield cap.buf
+
+
+def _meter_pool():
+    return _pool(proxy_pool.Proxy(host="127.0.0.1", port=1))
+
+
+def _meter_rows():
+    return [_mk_product(f"m{i}") for i in range(3)]
+
+
+def _meter_finish(rows, out, stop_reason, proxy_extra):
+    extra = {"site_fact": 1}
+    if proxy_extra:
+        extra.update(proxy_extra)
+    return output_writer.finish_run(
+        products=rows, out_path=out, fmt="json", engine="test", url=_SAVERS_URL,
+        pages_requested=2, pages_completed=1 if rows else 0, failed_pages=None,
+        blocked=False, remote_api_error=False, allow_empty=False, started_at=0.0,
+        extra_meta=extra,
+        stop_reason=None if stop_reason == "completed" else stop_reason)
+
+
+def _meter_engine_args(mod, out, *extra):
+    return _savers_args(mod, out, "--max-scrolls", "3", "--scroll-delay", "0",
+                        "--stall-rounds", "9", *extra)
+
+
+def _drive_scrape_search(mod, args, pool, on_content=None):
+    """scrape_search on fakes: navigation succeeds, every page read calls
+    `on_content` (to spend bytes), the scroll loop runs. Returns
+    (navigations, scrolls, meter_installed)."""
+    from unittest import mock
+    import asyncio
+    name = mod.__name__
+
+    def content(*a, **k):
+        if on_content:
+            on_content()
+        return "<html><body>nothing</body></html>"
+
+    if name == "playwright_scraper":
+        ctx = mock.MagicMock()
+        for attr in ("route", "add_init_script", "add_cookies", "new_page", "close"):
+            setattr(ctx, attr, mock.AsyncMock())
+        page = mock.MagicMock()
+        response = mock.MagicMock(status=200)
+        page.goto = mock.AsyncMock(return_value=response)
+        page.content = mock.AsyncMock(side_effect=content)
+        page.mouse.wheel = mock.AsyncMock()
+        for attr in ("close", "wait_for_timeout", "evaluate"):
+            setattr(page, attr, mock.AsyncMock())
+        ctx.new_page.return_value = page
+        browser = mock.MagicMock(contexts=[])
+        browser.new_context = mock.AsyncMock(return_value=ctx)
+        with mock.patch.object(mod.asyncio, "sleep", mock.AsyncMock()):
+            asyncio.run(mod.scrape_search(args=args, start_url=_SAVERS_URL, browser=browser,
+                                          proxy_pool=pool, client=None, autosolve=False,
+                                          user_agent=None, stats={}))
+        installed = any(c[0][0] == "requestfinished" for c in ctx.on.call_args_list)
+        return page.goto.await_count, page.mouse.wheel.await_count, installed
+    if name == "puppeteer_scraper":
+        cdp = mock.MagicMock()
+        cdp.send = mock.AsyncMock()
+        page = mock.MagicMock()
+        page.target.createCDPSession = mock.AsyncMock(return_value=cdp)
+        page.goto = mock.AsyncMock(return_value=mock.MagicMock(status=200))
+        page.content = mock.AsyncMock(side_effect=content)
+        for attr in ("evaluateOnNewDocument", "setUserAgent", "authenticate", "setCookie",
+                     "close", "evaluate", "setViewport"):
+            setattr(page, attr, mock.AsyncMock())
+        browser = mock.MagicMock()
+        browser.newPage = mock.AsyncMock(return_value=page)
+        browser.close = mock.AsyncMock()
+
+        async def fake_launch(**kw):
+            return browser
+        with mock.patch.object(mod, "_launch", fake_launch), \
+                mock.patch.object(mod.asyncio, "sleep", mock.AsyncMock()):
+            asyncio.run(mod.scrape_search(args=args, start_url=_SAVERS_URL, proxy_pool=pool,
+                                          client=None, autosolve=False, user_agent=None, stats={}))
+        scrolls = sum(1 for c in page.evaluate.await_args_list if "scrollBy" in str(c))
+        installed = any(c[0][0] == "Network.enable" for c in cdp.send.await_args_list)
+        return page.goto.await_count, scrolls, installed
+    driver = mock.MagicMock()
+    driver.get_log.return_value = []
+    type(driver).page_source = mock.PropertyMock(side_effect=content)
+    driver.execute_script.return_value = 200
+    with mock.patch.object(mod, "_build_driver", return_value=driver), \
+            mock.patch.object(mod.time, "sleep"):
+        mod.scrape_search(args=args, start_url=_SAVERS_URL, proxy_pool=pool,
+                          client=None, user_agent=None, stats={})
+    scrolls = sum(1 for c in driver.execute_script.call_args_list if "scrollBy" in str(c))
+    counter = getattr(driver, "_proxy_meter_counter", None)
+    import proxy_meter
+    return driver.get.call_count, scrolls, isinstance(counter, proxy_meter.CdpCounter)
+
+
+def _engine_run(mod, args, fake_search):
+    """mod.run(args) with scrape_search replaced and no browser."""
+    from unittest import mock
+    patches = [mock.patch.object(mod, "scrape_search", side_effect=fake_search)]
+    if mod.__name__ == "playwright_scraper":
+        pw = mock.MagicMock()
+        browser = mock.MagicMock()
+        browser.close = mock.AsyncMock()
+        pw.chromium.launch = mock.AsyncMock(return_value=browser)
+        cm = mock.MagicMock()
+        cm.__aenter__ = mock.AsyncMock(return_value=pw)
+        cm.__aexit__ = mock.AsyncMock(return_value=False)
+        patches.append(mock.patch.object(mod, "async_playwright", return_value=cm))
+    with _contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        cap = stack.enter_context(_Captured())
+        try:
+            rc = asyncio_run_maybe(mod, args)
+        except BaseException as exc:  # noqa: BLE001 — fail BY NAME
+            rc = f"raised {type(exc).__name__}"
+    return rc, cap.text()
+
+
+def test_proxy_meter_in_the_engines():
+    _mgroup("Proxy traffic meter: wired into every installed engine")
+    import proxy_meter
+    engines = _savers_engines()
+    if not engines:
+        print("  SKIP proxy meter driving: no engine driver installed here (engine-smoke runs it per driver)")
+        return
+    for mod in engines:
+        name = mod.__name__
+        for label, use_proxy, want in (("through a proxy", True, True),
+                                       ("without a proxy", False, False)):
+            with tempfile.TemporaryDirectory() as td:
+                args = _meter_engine_args(mod, str(Path(td) / "o.json"))
+                pool = _meter_pool() if use_proxy else None
+                proxy_meter.start(args, pool)
+                with _Captured():
+                    _, _, got = _drive_scrape_search(mod, args, pool)
+            _mcheck(f"{name}: meter installed {label} = {want} (got {got})", got is want)
+
+        with tempfile.TemporaryDirectory() as td:
+            args = _meter_engine_args(mod, str(Path(td) / "o.json"), "--proxy-budget-mb", "0.001")
+            pool = _meter_pool()
+            proxy_meter.start(args, pool).add(5_000)
+            with _Captured():
+                navs, scrolls, _ = _drive_scrape_search(mod, args, pool)
+        _mcheck(f"{name}: over budget, the search page is never navigated to (navigations={navs})",
+                navs == 0)
+
+        with tempfile.TemporaryDirectory() as td:
+            args = _meter_engine_args(mod, str(Path(td) / "o.json"), "--proxy-budget-mb", "0.01")
+            pool = _meter_pool()
+            meter = proxy_meter.start(args, pool)
+            if name == "selenium_scraper":
+                # Selenium is fed from the performance log: nothing before the
+                # navigation, then 20 kB once the page has loaded.
+                from unittest import mock
+                big = [{"message": json.dumps({"message": {
+                    "method": "Network.loadingFinished",
+                    "params": {"requestId": "z", "encodedDataLength": 20_000}}})}]
+                reads = {"n": 0}
+
+                def get_log(kind):
+                    reads["n"] += 1
+                    return [] if reads["n"] == 1 else big
+                built = []
+
+                def build(**kw):
+                    d = mock.MagicMock()
+                    d.get_log.side_effect = get_log
+                    type(d).page_source = mock.PropertyMock(return_value="<html></html>")
+                    d.execute_script.return_value = 200
+                    built.append(d)
+                    return d
+                with mock.patch.object(mod, "_build_driver", side_effect=build), \
+                        mock.patch.object(mod.time, "sleep"), _Captured():
+                    mod.scrape_search(args=args, start_url=_SAVERS_URL, proxy_pool=pool,
+                                      client=None, user_agent=None, stats={})
+                d = built[0]
+                navs = d.get.call_count
+                scrolls = sum(1 for c in d.execute_script.call_args_list if "scrollBy" in str(c))
+            else:
+                with _Captured():
+                    navs, scrolls, _ = _drive_scrape_search(
+                        mod, args, pool, on_content=lambda: meter.add(20_000))
+            _mcheck(f"{name}: crossing the budget in the first round stops scrolling "
+                    f"(navigations={navs}, scrolls={scrolls}, bytes={meter.bytes})",
+                    navs == 1 and scrolls == 0 and meter.exceeded)
+
+        # run(): the budget decides the exit code and the sidecars.
+        for rows_kept, want_rc in ((True, 6), (False, 5)):
+            with tempfile.TemporaryDirectory() as td:
+                out = str(Path(td) / "o.json")
+                args = _meter_engine_args(mod, out, "--proxy", "http://127.0.0.1:" + str(_closed_port()),
+                                          "--proxy-budget-mb", "0.01")
+                calls = []
+
+                def fake(**kw):
+                    calls.append(1)
+                    proxy_meter.of(kw["args"]).add(20_000)
+                    # mock.patch makes an async scrape_search an AsyncMock, which
+                    # awaits nothing itself: return the tuple for every engine.
+                    return ((_meter_rows() if rows_kept else []), False, not rows_kept, 0, False)
+                rc, log_text = _engine_run(mod, args, fake)
+                meta_p, att_p = Path(out + ".meta.json"), Path(out + ".latest_attempt.meta.json")
+                meta = json.loads(meta_p.read_text()) if meta_p.exists() else {}
+                att = json.loads(att_p.read_text()) if att_p.exists() else {}
+            label = "with rows" if rows_kept else "with no rows"
+            _mcheck(f"{name}: run() over budget {label} → exit {want_rc} (rc={rc}, searches={len(calls)})",
+                    rc == want_rc and len(calls) == 1)
+            _mcheck(f"{name}: ...stop_reason proxy_budget_exceeded and the proxy fields in the "
+                    f"attempt sidecar{' and .meta.json' if rows_kept else ' (no .meta.json)'}",
+                    att.get("stop_reason") == "proxy_budget_exceeded"
+                    and att.get("proxy_bytes") == 20_000 and att.get("proxy_budget_bytes") == 10_000
+                    and att.get("proxy_budget_exceeded") is True
+                    and ((meta.get("stop_reason") == "proxy_budget_exceeded"
+                          and meta.get("proxy_bytes") == 20_000) if rows_kept else not meta))
+            _mcheck(f"{name}: ...and the log says 'Proxy traffic: 0.0 MB of 0.0 MB budget'",
+                    "Proxy traffic: 0.0 MB of 0.0 MB budget" in log_text)
+
+
+def _closed_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+# ---------------------------------------------------------------------------
+# Proxy traffic meter and budget
+# ---------------------------------------------------------------------------
+
+class _ByteCountingProxy:
+    """A forward HTTP proxy on 127.0.0.1 that serves every plain-http GET
+    itself with a body of a known size, and counts every byte it received
+    and sent. The meter is judged against these two numbers."""
+
+    def __init__(self, sizes):
+        import socket
+        import threading
+        self.sizes = dict(sizes)            # path -> body length
+        self.received = self.sent = 0
+        # CONNECTs are the browser's own background connections (a system
+        # Chromium phones home through its proxy too); they are not page
+        # requests, this stub refuses them, and they are kept apart.
+        self.connects = 0
+        self.paths = []
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(32)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        import threading
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._one, args=(conn,), daemon=True).start()
+
+    def _one(self, conn):
+        from urllib.parse import urlparse
+        with conn:
+            buf = b""
+            while True:
+                while b"\r\n\r\n" not in buf:
+                    try:
+                        chunk = conn.recv(65536)
+                    except OSError:
+                        return
+                    if not chunk:
+                        return
+                    buf += chunk
+                head, _, buf = buf.partition(b"\r\n\r\n")
+                lines = head.decode("latin-1").split("\r\n")
+                if lines[0].startswith("CONNECT "):
+                    self.connects += 1
+                    try:
+                        conn.sendall(b"HTTP/1.1 403 Forbidden\r\n"
+                                     b"Content-Length: 0\r\n\r\n")
+                    except OSError:
+                        pass
+                    return
+                self.received += len(head) + 4
+                length = 0
+                for line in lines[1:]:
+                    if line.lower().startswith("content-length:"):
+                        length = int(line.split(":", 1)[1])
+                while len(buf) < length:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        return
+                    buf += chunk
+                self.received += length
+                buf = buf[length:]
+                path = urlparse(lines[0].split(" ")[1]).path or "/"
+                self.paths.append(path)
+                size = self.sizes.get(path, 0)
+                ctype = ("text/html" if path == "/" else "text/css"
+                         if path.endswith(".css") else
+                         "application/javascript" if path.endswith(".js")
+                         else "application/octet-stream")
+                body = (b"<html><head><link rel=stylesheet href=/s.css>"
+                        b"<script src=/a.js></script></head><body><p id=t>"
+                        if path == "/" else b"")
+                body = body + b"x" * max(0, size - len(body))
+                if path == "/":
+                    body = body[:-11] + b"</p></body>"
+                status = b"200 OK" if path in self.sizes else b"404 Not Found"
+                out = (b"HTTP/1.1 " + status + b"\r\nContent-Type: "
+                       + ctype.encode() + b"\r\nContent-Length: "
+                       + str(len(body)).encode()
+                       + b"\r\nCache-Control: no-store\r\n\r\n" + body)
+                try:
+                    conn.sendall(out)
+                except OSError:
+                    return
+                self.sent += len(out)
+
+    @property
+    def total(self):
+        return self.received + self.sent
+
+    def url(self):
+        return "http://127.0.0.1:" + str(self.port)
+
+    def close(self):
+        self.sock.close()
+
+
+def _base_exception(fn):
+    try:
+        fn()
+    except BaseException as e:  # noqa: BLE001 — the point is to see it
+        return e
+    return None
+
+
+def test_proxy_meter_units(skips):
+    _mgroup("Proxy traffic meter: counting, the budget, the sidecar")
+    import argparse
+    from unittest import mock
+    import output_writer
+    import proxy_meter
+    ok = True
+    ns = argparse.Namespace
+
+    # -- the meter itself ----------------------------------------------------
+    m = proxy_meter.ProxyMeter(1)
+    fired = []
+    m.on_exceed(lambda: fired.append(1))
+    m.add(600_000)
+    m.add(400_000)
+    ok &= _mcheck("1 MB budget: exactly 1,000,000 bytes is not over it",
+                m.bytes == 1_000_000 and not m.exceeded and not fired)
+    m.add(1)
+    ok &= _mcheck("...one byte more is, and the refusal hook fires",
+                m.exceeded and fired == [1])
+    m.add(50)
+    ok &= _mcheck("...the hook fires once, not per request", fired == [1])
+    err = _base_exception(m.check)
+    ok &= _mcheck("check() raises ProxyBudgetExceeded once over budget",
+                isinstance(err, proxy_meter.ProxyBudgetExceeded))
+    ok &= _mcheck("ProxyBudgetExceeded passes an `except Exception` (a retry "
+                "loop cannot swallow it)",
+                not issubclass(proxy_meter.ProxyBudgetExceeded, Exception))
+    ok &= _mcheck("sidecar fields: bytes, budget in bytes, exceeded",
+                m.sidecar() == {"proxy_bytes": 1_000_051,
+                                "proxy_budget_bytes": 1_000_000,
+                                "proxy_budget_exceeded": True})
+    ok &= _mcheck(f"summary line ({m.summary()})",
+                m.summary() == "Proxy traffic: 1.0 MB of 1.0 MB budget")
+    late = []
+    m.on_exceed(lambda: late.append(1))
+    ok &= _mcheck("a hook added after the cap was crossed runs at once",
+                late == [1])
+    free = proxy_meter.ProxyMeter(0)
+    free.add(10 ** 12)
+    ok &= _mcheck("--proxy-budget-mb 0 means no cap (null budget in the "
+                "sidecar)", not free.exceeded and _base_exception(free.check)
+                is None and free.sidecar()["proxy_budget_bytes"] is None)
+
+    # -- the flag and the environment ----------------------------------------
+    parser = argparse.ArgumentParser()
+    proxy_meter.add_budget_flag(parser)
+    for bad in ("-1", "abc", "nan", "inf"):
+        try:
+            with _contextlib.redirect_stderr(_io.StringIO()):
+                parser.parse_args(["--proxy-budget-mb", bad])
+            refused = False
+        except SystemExit as e:
+            refused = e.code == 2
+        ok &= _mcheck(f"--proxy-budget-mb {bad} is a usage error (exit 2)",
+                    refused)
+    ok &= _mcheck("--proxy-budget-mb 0 and 2.5 parse",
+                parser.parse_args(["--proxy-budget-mb", "0"]).proxy_budget_mb
+                == 0.0 and parser.parse_args(
+                    ["--proxy-budget-mb", "2.5"]).proxy_budget_mb == 2.5)
+    env = proxy_meter.BUDGET_ENV
+    with mock.patch.dict(os.environ, {env: ""}):
+        ok &= _mcheck("default budget is 10 MB",
+                    proxy_meter.budget_mb(ns(proxy_budget_mb=None)) == 10.0
+                    and proxy_meter.DEFAULT_BUDGET_MB == 10.0)
+    with mock.patch.dict(os.environ, {env: "2.5"}):
+        ok &= _mcheck(f"{env} sets the budget",
+                    proxy_meter.budget_mb(ns(proxy_budget_mb=None)) == 2.5)
+        ok &= _mcheck("...and the flag wins over it",
+                    proxy_meter.budget_mb(ns(proxy_budget_mb=1.0)) == 1.0)
+    with mock.patch.dict(os.environ, {env: "lots"}):
+        ok &= _mcheck(f"an unparseable {env} stops the run instead of "
+                    "silently using a default",
+                    isinstance(_base_exception(lambda: proxy_meter.budget_mb(
+                        ns(proxy_budget_mb=None))), SystemExit))
+    if hasattr(env_config, "ENV_KEYS"):
+        ok &= _mcheck(f"{env} maps onto --proxy-budget-mb",
+                    env_config.ENV_KEYS.get(env) == "proxy_budget_mb")
+    pool = _meter_pool()
+    ok &= _mcheck("metered only through a local proxy: not without one, not "
+                "over --cdp-endpoint",
+                proxy_meter.start(ns(proxy_budget_mb=None), None) is None
+                and proxy_meter.start(ns(proxy_budget_mb=None), pool,
+                                      remote=True) is None
+                and isinstance(proxy_meter.start(ns(proxy_budget_mb=None),
+                                                 pool), proxy_meter.ProxyMeter))
+
+    a = ns(proxy_budget_mb=0.001)
+    proxy_meter.start(a, pool).add(5_000)
+    ok &= _mcheck("proxy_meter.check(args) stops a run that is over budget",
+                isinstance(_base_exception(lambda: proxy_meter.check(a)),
+                           proxy_meter.ProxyBudgetExceeded)
+                and _base_exception(lambda: proxy_meter.check(
+                    ns(proxy_budget_mb=None))) is None)
+
+    # -- CDP events with known sizes (pyppeteer, Selenium) ------------------
+    m = proxy_meter.ProxyMeter(0)
+    c = proxy_meter.CdpCounter(m)
+    req = {"method": "GET", "url": "http://x.test/a", "headers": {"A": "b"}}
+    est = len("GET http://x.test/a HTTP/1.1\r\n") + 2 + len("A: b\r\n")
+    c.feed("Network.requestWillBeSent", {"requestId": "1", "request": req})
+    c.feed("Network.dataReceived", {"requestId": "1", "encodedDataLength": 99})
+    c.feed("Network.loadingFinished", {"requestId": "1",
+                                       "encodedDataLength": 1234})
+    ok &= _mcheck(f"CDP: a finished request = its request + encodedDataLength "
+                f"({m.bytes} vs {est + 1234})", m.bytes == est + 1234)
+    c.feed("Network.requestWillBeSent", {"requestId": "2", "request": req})
+    c.feed("Network.loadingFailed", {"requestId": "2",
+                                     "errorText": "net::ERR_BLOCKED_BY_CLIENT"})
+    c.feed("Network.requestWillBeSent", {"requestId": "2b", "request": req})
+    c.feed("Network.loadingFailed", {"requestId": "2b", "errorText": "x",
+                                     "blockedReason": "inspector"})
+    ok &= _mcheck("CDP: a request the browser blocked costs nothing",
+                m.bytes == est + 1234)
+    c.feed("Network.requestWillBeSent", {"requestId": "3", "request": req})
+    c.feed("Network.dataReceived", {"requestId": "3", "encodedDataLength": 50})
+    c.feed("Network.loadingFailed", {"requestId": "3",
+                                     "errorText": "net::ERR_CONNECTION_RESET"})
+    ok &= _mcheck("CDP: a request that failed mid-body costs what arrived",
+                m.bytes == 2 * est + 1234 + 50)
+    c.feed("Network.requestWillBeSent", {"requestId": "4", "request": req})
+    c.feed("Network.requestWillBeSent", {
+        "requestId": "4", "request": req,
+        "redirectResponse": {"encodedDataLength": 300}})
+    c.feed("Network.loadingFinished", {"requestId": "4",
+                                       "encodedDataLength": 500})
+    ok &= _mcheck("CDP: a redirect hop is counted as its own exchange",
+                m.bytes == 4 * est + 1234 + 50 + 300 + 500)
+
+    # -- Playwright: sizes() of every finished/failed request ---------------
+    m = proxy_meter.ProxyMeter(0.001)
+    ctx = mock.MagicMock()
+    proxy_meter.install_playwright(ctx, m)
+    on = {call[0][0]: call[0][1] for call in ctx.on.call_args_list}
+    request = mock.MagicMock()
+    request.sizes.return_value = {"requestHeadersSize": 100,
+                                  "requestBodySize": 20,
+                                  "responseHeadersSize": 200,
+                                  "responseBodySize": 500}
+    on.get("requestfinished", lambda r: None)(request)
+    dead = mock.MagicMock()
+    dead.sizes.side_effect = RuntimeError("no response")
+    on.get("requestfailed", lambda r: None)(dead)
+    ok &= _mcheck(f"Playwright: request.sizes() summed on requestfinished "
+                f"({m.bytes} of 820), a failed one without sizes is 0",
+                m.bytes == 820 and "requestfailed" in on)
+    pattern, gate = ctx.route.call_args[0]
+    route = mock.MagicMock()
+    gate(route)
+    ok &= _mcheck(f"Playwright: under budget the route falls through to the "
+                f"next handler ({pattern})", pattern == "**/*"
+                and route.fallback.called and not route.abort.called)
+    on["requestfinished"](request)
+    route = mock.MagicMock()
+    gate(route)
+    ok &= _mcheck("Playwright: over budget every new request is aborted",
+                route.abort.called and not route.fallback.called)
+    ok &= _mcheck("no meter, nothing installed",
+                proxy_meter.install_playwright(ctx, None) is None
+                and ctx.route.call_count == 1)
+
+    # -- Selenium: the performance log --------------------------------------
+    m = proxy_meter.ProxyMeter(0.001)
+    driver = mock.MagicMock()
+    log = [{"message": json.dumps({"message": {
+        "method": "Network.requestWillBeSent",
+        "params": {"requestId": "9", "request": req}}})},
+        {"message": json.dumps({"message": {
+            "method": "Network.loadingFinished",
+            "params": {"requestId": "9", "encodedDataLength": 2000}}})},
+        {"message": "not json"}]
+    driver.get_log.return_value = log
+    proxy_meter.install_selenium(driver, m)
+    entries = proxy_meter.selenium_log(driver)
+    ok &= _mcheck(f"Selenium: the performance log is counted ({m.bytes} = "
+                f"{est + 2000}) and handed back to the engine's own reader",
+                m.bytes == est + 2000 and entries == log)
+    blocked = [call[0] for call in driver.execute_cdp_cmd.call_args_list]
+    ok &= _mcheck("Selenium: over budget, every URL is blocked over CDP",
+                ("Network.setBlockedURLs", {"urls": ["*"]}) in blocked)
+    options = mock.MagicMock()
+    proxy_meter.selenium_options(options, m)
+    ok &= _mcheck("Selenium: the performance log is requested",
+                options.set_capability.call_args[0] ==
+                ("goog:loggingPrefs", {"performance": "ALL"}))
+
+    # -- pyppeteer: its own CDP session -------------------------------------
+    import asyncio
+    m = proxy_meter.ProxyMeter(0.001)
+    cdp = mock.MagicMock()
+    cdp.send = mock.AsyncMock()
+    page = mock.MagicMock()
+    page.target.createCDPSession = mock.AsyncMock(return_value=cdp)
+
+    async def _drive():
+        await proxy_meter.install_pyppeteer(page, m)
+        on = {call[0][0]: call[0][1] for call in cdp.on.call_args_list}
+        on["Network.requestWillBeSent"]({"requestId": "p", "request": req})
+        on["Network.loadingFinished"]({"requestId": "p",
+                                       "encodedDataLength": 1500})
+        await asyncio.sleep(0)
+
+    asyncio.run(_drive())
+    sent = [call[0] for call in cdp.send.await_args_list]
+    ok &= _mcheck(f"pyppeteer: Network events counted ({m.bytes} = "
+                f"{est + 1500})", m.bytes == est + 1500
+                and ("Network.enable", {}) in sent)
+    ok &= _mcheck("pyppeteer: over budget, every URL is blocked over CDP",
+                ("Network.setBlockedURLs", {"urls": ["*"]}) in sent)
+
+    # -- an HTTP client, through a real stub proxy with known sizes ---------
+    import requests
+    stub = _ByteCountingProxy({"/": 20_000})
+    try:
+        m = proxy_meter.ProxyMeter(0)
+        r = requests.get("http://meter.test/", proxies={"http": stub.url()},
+                         timeout=10)
+        proxy_meter.count_response(m, r)
+        import time as _time
+        for _ in range(50):
+            if stub.sent:
+                break
+            _time.sleep(0.02)
+        drift = abs(m.bytes - stub.total) / stub.total
+        ok &= _mcheck(f"HTTP client through a stub proxy: metered {m.bytes} B, "
+                    f"the proxy carried {stub.total} B ({drift:.1%}, "
+                    f"tolerance 5%)", drift <= 0.05)
+    finally:
+        stub.close()
+
+    # -- the sidecars --------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "out")
+        metered = proxy_meter.ProxyMeter(10)
+        metered.add(123_456)
+        rows = _meter_rows()
+        with _contextlib.redirect_stdout(_io.StringIO()):
+            rc = _meter_finish(rows, out, "completed", metered.sidecar())
+        meta = json.load(open(out + ".meta.json"))
+        attempt = json.load(open(out + ".latest_attempt.meta.json"))
+        ok &= _mcheck(f"a metered run records proxy_bytes / proxy_budget_bytes "
+                    f"/ proxy_budget_exceeded in .meta.json (rc={rc})",
+                    rc == 0 and meta.get("proxy_bytes") == 123_456
+                    and meta.get("proxy_budget_bytes") == 10_000_000
+                    and meta.get("proxy_budget_exceeded") is False)
+        ok &= _mcheck("...and the same in .latest_attempt.meta.json",
+                    attempt.get("proxy_bytes") == 123_456
+                    and attempt.get("status") == meta.get("status"))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "out")
+        over = proxy_meter.ProxyMeter(0.0001)
+        over.add(5_000)
+        with _contextlib.redirect_stdout(_io.StringIO()):
+            rc = _meter_finish(_meter_rows(), out,
+                               proxy_meter.STOP_BUDGET_EXCEEDED, over.sidecar())
+        meta = json.load(open(out + ".meta.json"))
+        ok &= _mcheck(f"over budget WITH rows: exit 6, partial, "
+                    f"stop_reason proxy_budget_exceeded (rc={rc})",
+                    rc == 6 and meta.get("status") == "partial"
+                    and meta.get("stop_reason") == "proxy_budget_exceeded"
+                    and meta.get("proxy_budget_exceeded") is True)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "out")
+        for name, body in (("out.json", "[1]"), ("out.meta.json", "{}")):
+            with open(os.path.join(tmp, name), "w") as f:
+                f.write(body)
+        with _contextlib.redirect_stdout(_io.StringIO()):
+            rc = _meter_finish([], out, proxy_meter.STOP_BUDGET_EXCEEDED,
+                               over.sidecar())
+        attempt = json.load(open(out + ".latest_attempt.meta.json"))
+        untouched = (open(out + ".json").read() == "[1]"
+                     and open(out + ".meta.json").read() == "{}")
+        ok &= _mcheck(f"over budget with NO rows: exit 5 (rc={rc}), the "
+                    f"attempt sidecar says so, the previous output is kept",
+                    rc == 5 and untouched
+                    and attempt.get("stop_reason") == "proxy_budget_exceeded"
+                    and attempt.get("proxy_budget_exceeded") is True
+                    and attempt.get("status") == "failed")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "out")
+        with _contextlib.redirect_stdout(_io.StringIO()):
+            _meter_finish(_meter_rows(), out, "completed", None)
+        ok &= _mcheck("an unmetered run writes no attempt sidecar and no "
+                    "proxy fields (unchanged)",
+                    not os.path.exists(out + ".latest_attempt.meta.json")
+                    and "proxy_bytes" not in json.load(
+                        open(out + ".meta.json")))
+
+    a = ns(proxy_budget_mb=None)
+    setattr(a, "_proxy_meter", metered)
+    # Read off the logger calls, not a handler: the root logger's level
+    # differs between entry points and would hide an INFO line.
+    with mock.patch.object(proxy_meter.logger, "info") as info, \
+            mock.patch.object(proxy_meter.logger, "warning") as warn:
+        extra = proxy_meter.finish(a, {"site": 1})
+    said = [c[0][0] % c[0][1:] for c in
+            info.call_args_list + warn.call_args_list]
+    ok &= _mcheck(f"the run ends with 'Proxy traffic: X.X MB of Y MB budget' "
+                f"({said})",
+                "Proxy traffic: 0.1 MB of 10.0 MB budget" in said
+                and extra.get("site") == 1 and extra.get("proxy_bytes"))
+    return ok
+
+
+# A request the PAGE makes after the cap. Navigations are stopped by the
+# engines' own check() before they are issued; this is what the in-browser
+# refusal (a route abort, CDP Network.setBlockedURLs) is for.
+_LATE_FETCH = ("fetch('/n').then(r => r.status).catch(e => 'refused')")
+
+
+def test_proxy_meter_in_a_real_browser(skips):
+    """Opt-in (PROXY_METER_BROWSER=1): each installed driver loads a page
+    through _ByteCountingProxy, and the meter must agree with what the proxy
+    carried. Needs a Chromium; not run in CI, which installs none."""
+    _mgroup("Proxy traffic meter in a real browser (opt-in)")
+    if os.environ.get("PROXY_METER_BROWSER") != "1":
+        print("  not run — set PROXY_METER_BROWSER=1 with a Chromium "
+              "installed to measure the meter against a stub proxy")
+        return True
+    import proxy_meter
+    import time as _time
+    ok = True
+    sizes = {"/": 60_000, "/s.css": 30_000, "/a.js": 90_000, "/n": 40_000}
+    chromium = os.environ.get("PROXY_METER_CHROMIUM", "/usr/bin/chromium")
+    target = "http://meter.test/"
+    ran = 0
+    for driver in ("playwright", "pyppeteer", "selenium"):
+        try:
+            __import__(driver)
+        except ImportError:
+            continue
+        ran += 1
+        stub = _ByteCountingProxy(sizes)
+        meter = proxy_meter.ProxyMeter(0.15)
+        stopped = None
+        try:
+            if driver == "playwright":
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as pw:
+                    b = pw.chromium.launch(headless=True,
+                                           proxy={"server": stub.url()})
+                    ctx = b.new_context()
+                    proxy_meter.install_playwright(ctx, meter)
+                    p = ctx.new_page()
+                    p.goto(target)
+                    p.wait_for_timeout(800)
+                    first = (meter.bytes, stub.total)
+                    p.evaluate(_LATE_FETCH)
+                    p.wait_for_timeout(500)
+                    stopped = _base_exception(meter.check)
+                    b.close()
+            elif driver == "pyppeteer":
+                import asyncio
+                from pyppeteer import launch
+
+                async def go():
+                    b = await launch(headless=True, executablePath=chromium,
+                                     args=["--no-sandbox",
+                                           f"--proxy-server={stub.url()}"],
+                                     handleSIGINT=False, handleSIGTERM=False,
+                                     handleSIGHUP=False)
+                    p = await b.newPage()
+                    await proxy_meter.install_pyppeteer(p, meter)
+                    await p.goto(target)
+                    await asyncio.sleep(0.8)
+                    snap = (meter.bytes, stub.total)
+                    await p.evaluate(_LATE_FETCH, force_expr=True)
+                    await asyncio.sleep(0.5)
+                    await b.close()
+                    return snap
+                first = asyncio.new_event_loop().run_until_complete(go())
+                stopped = _base_exception(meter.check)
+            else:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.options import Options
+                from selenium.webdriver.chrome.service import Service
+                o = Options()
+                o.add_argument("--headless=new")
+                o.add_argument("--no-sandbox")
+                o.add_argument(f"--proxy-server={stub.url()}")
+                o.binary_location = chromium
+                proxy_meter.selenium_options(o, meter)
+                d = webdriver.Chrome(options=o, service=Service(
+                    os.environ.get("PROXY_METER_CHROMEDRIVER",
+                                   "/usr/bin/chromedriver")))
+                proxy_meter.install_selenium(d, meter)
+                d.get(target)
+                _time.sleep(0.8)
+                proxy_meter.drain_selenium(d)
+                first = (meter.bytes, stub.total)
+                d.execute_script("return " + _LATE_FETCH)
+                _time.sleep(0.5)
+                proxy_meter.drain_selenium(d)
+                stopped = _base_exception(meter.check)
+                d.quit()
+        except Exception as e:  # noqa: BLE001 — report by name
+            ok &= _mcheck(f"{driver}: real-browser meter run ({e!r:.160})", False)
+            stub.close()
+            continue
+        stub.close()
+        metered, carried = first
+        drift = abs(metered - carried) / max(1, carried)
+        ok &= _mcheck(f"{driver}: page + css + js through the stub proxy: "
+                    f"metered {metered} B, the proxy carried {carried} B "
+                    f"({drift:.1%}, tolerance 10%)", drift <= 0.10)
+        ok &= _mcheck(f"{driver}: past the 0.15 MB budget a request the page "
+                    f"makes never reaches the proxy, and check() stops the "
+                    f"run before its next navigation (proxy saw {stub.paths})",
+                    isinstance(stopped, proxy_meter.ProxyBudgetExceeded)
+                    and "/a.js" in stub.paths and "/n" not in stub.paths)
+    if not ran:
+        print("  no browser driver installed")
+    return ok
+
+
+def test_canary_reports_proxy_traffic():
+    _mgroup("Canary: proxy traffic in the step summary, budget enforced")
+    if not (ROOT / ".github" / "workflows" / "canary.yml").exists():
+        # The Docker image runs this suite without .github/ in the tree.
+        print("  not run — no .github/workflows in this tree")
+        return True
+    import subprocess
+    ok = True
+    text = open(str(ROOT / ".github" / "workflows" / "canary.yml"),
+                encoding="utf-8").read()
+    steps = re.split(r"\n\s*- (?:name|uses):", text)
+    # Only the job that goes out through SKYSCANNER_PROXY is metered; the
+    # Scraping Browser job has no local proxy.
+    runs = [s for s in steps if re.search(r"\w+_scraper\.py", s)
+            and "--out" in s and "secrets.SKYSCANNER_PROXY" in s]
+    ok &= _mcheck(f"every canary scrape passes --proxy-budget-mb 10 "
+                f"({len(runs)} run step(s))", bool(runs) and all(
+                    "--proxy-budget-mb 10" in r for r in runs))
+    outs = set()
+    for r in runs:
+        outs.update(re.findall(r"--out\s+(\S+)", r))
+    reporters = [s for s in steps if ".github/proxy_traffic.py" in s
+                 and "!cancelled()" in s]
+    reported = set()
+    for s in reporters:
+        reported.update(re.findall(r"proxy_traffic\.py\s+\S+\s+(\S+)", s))
+    ok &= _mcheck(f"each run's proxy traffic goes to the step summary, even "
+                f"after a failed step (runs {sorted(outs)}, reported "
+                f"{sorted(reported)})", bool(outs) and outs <= reported)
+
+    script = str(ROOT / ".github" / "proxy_traffic.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        summary = os.path.join(tmp, "summary.md")
+        results = {}
+        for case, meta in (
+                ("over", {"proxy_bytes": 12_300_000,
+                          "proxy_budget_bytes": 10_000_000,
+                          "proxy_budget_exceeded": True}),
+                ("under", {"proxy_bytes": 2_340_000,
+                           "proxy_budget_bytes": 10_000_000,
+                           "proxy_budget_exceeded": False}),
+                ("plain", {"status": "complete"}),
+                ("missing", None)):
+            out = os.path.join(tmp, case)
+            if meta is not None:
+                with open(out + ".latest_attempt.meta.json", "w") as f:
+                    json.dump(meta, f)
+            proc = subprocess.run(
+                [sys.executable, script, "live/" + case, out],
+                capture_output=True, text=True,
+                env={**os.environ, "GITHUB_STEP_SUMMARY": summary})
+            results[case] = (proc.returncode, proc.stdout)
+        written = open(summary).read() if os.path.exists(summary) else ""
+    rc, out = results["over"]
+    ok &= _mcheck(f"over budget: '::error::stopped: proxy budget 10 MB "
+                f"exceeded' and the step fails (rc={rc})", rc == 1
+                and "::error::stopped: proxy budget 10 MB exceeded" in out)
+    ok &= _mcheck("under budget: '**live/under**: proxy traffic 2.3 MB of "
+                "10 MB' in the summary, step passes",
+                results["under"][0] == 0
+                and "**live/under**: proxy traffic 2.3 MB of 10 MB" in written
+                and "**live/over**: proxy traffic 12.3 MB of 10 MB" in written)
+    ok &= _mcheck("no proxy fields / no sidecar: reported, not a crash",
+                results["plain"][0] == 0 and results["missing"][0] == 0
+                and "not metered" in written and "unknown" in written)
+    return ok
+
+
+def test_async_playwright_meter_in_a_real_browser():
+    """Opt-in twin of the check above for THIS repo's Playwright engine,
+    which uses the async API (proxy_meter.install_playwright_async)."""
+    if os.environ.get("PROXY_METER_BROWSER") != "1":
+        return
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return
+    import asyncio
+    import proxy_meter
+    stub = _ByteCountingProxy({"/": 60_000, "/s.css": 30_000, "/a.js": 90_000, "/n": 40_000})
+    meter = proxy_meter.ProxyMeter(0.15)
+
+    async def go():
+        async with async_playwright() as pw:
+            b = await pw.chromium.launch(headless=True, proxy={"server": stub.url()})
+            ctx = await b.new_context()
+            await proxy_meter.install_playwright_async(ctx, meter)
+            p = await ctx.new_page()
+            await p.goto("http://meter.test/")
+            await p.wait_for_timeout(800)
+            snap = (meter.bytes, stub.total)
+            await p.evaluate(_LATE_FETCH)
+            await p.wait_for_timeout(500)
+            await b.close()
+            return snap
+    try:
+        metered, carried = asyncio.run(go())
+    finally:
+        stub.close()
+    drift = abs(metered - carried) / max(1, carried)
+    _mcheck(f"playwright (async API, as this repo's engine uses it): metered {metered} B, the "
+            f"proxy carried {carried} B ({drift:.1%}, tolerance 10%)", drift <= 0.10)
+    _mcheck(f"playwright (async API): past the budget a page request never reaches the proxy "
+            f"(proxy saw {stub.paths})", meter.exceeded and "/n" not in stub.paths)
+
+
+def test_batch_proxy_budget():
+    """batch_scraper: ONE budget for the whole batch. Each route's engine is
+    handed what is left; past the cap the remaining routes are not run."""
+    _mgroup("batch_scraper: one proxy budget across all routes")
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as d:
+        routes = Path(d) / "routes.csv"
+        routes.write_text("origin,destination,depart_date\nLHR,JFK,2026-11-01\n"
+                          "LHR,CDG,2026-11-02\nLHR,MAD,2026-11-03\n", encoding="utf-8")
+        out = str(Path(d) / "batch.json")
+        seen = []
+
+        def fake_engine(argv):
+            budget = argv[argv.index("--proxy-budget-mb") + 1]
+            target = argv[argv.index("--out") + 1]
+            seen.append(float(budget))
+            Path(target).write_text(json.dumps([_mk_product(f"b{len(seen)}").__dict__]),
+                                    encoding="utf-8")
+            Path(target + ".latest_attempt.meta.json").write_text(json.dumps(
+                {"proxy_bytes": 6_000_000, "proxy_budget_bytes": 10_000_000,
+                 "proxy_budget_exceeded": False}), encoding="utf-8")
+            return 0
+        orig_route = batch_scraper.scrape_route
+        with mock.patch.object(batch_scraper, "scrape_route",
+                               lambda r, **kw: orig_route(r, run_engine=fake_engine, **kw)), \
+                mock.patch.object(batch_scraper, "local_cdp_alive", return_value=True), \
+                mock.patch.object(batch_scraper.time, "sleep"), _Captured() as cap:
+            rc = batch_scraper.main(["--routes-file", str(routes), "--out", out,
+                                     "--no-launch-chrome", "--proxy-budget-mb", "10"])
+        meta = json.loads(Path(out + ".meta.json").read_text()) if Path(out + ".meta.json").exists() else {}
+        att = Path(out + ".latest_attempt.meta.json")
+        att = json.loads(att.read_text()) if att.exists() else {}
+    _mcheck(f"batch: each route gets the budget that is LEFT ({seen})",
+            len(seen) == 2 and abs(seen[0] - 10.0) < 1e-6 and abs(seen[1] - 4.0) < 1e-6)
+    _mcheck(f"batch: past the cap the third route is not run, exit 6 with the rows kept (rc={rc})",
+            rc == 6 and meta.get("product_count") == 2)
+    _mcheck("batch: stop_reason proxy_budget_exceeded and the batch total in both sidecars",
+            meta.get("stop_reason") == "proxy_budget_exceeded"
+            and meta.get("proxy_bytes") == 12_000_000 and meta.get("proxy_budget_exceeded") is True
+            and meta.get("routes_requested") == 3 and att.get("proxy_bytes") == 12_000_000)
+    _mcheck("batch: the log ends with the batch's proxy traffic",
+            "Proxy traffic: 12.0 MB of 10.0 MB budget" in cap.text())
+
+
+test_proxy_meter_units([])
+test_proxy_meter_in_the_engines()
+test_proxy_meter_in_a_real_browser([])
+test_async_playwright_meter_in_a_real_browser()
+test_canary_reports_proxy_traffic()
+test_batch_proxy_budget()
+
+
+
 def run() -> int:
     """All @check-decorated functions above already ran at import time
     (that's the point — see the `check()` docstring) and self-registered
