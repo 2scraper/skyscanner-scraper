@@ -433,7 +433,7 @@ every finished or failed request; pyppeteer reads CDP
 included) plus each request's line, headers and body from
 `Network.requestWillBeSent`; Selenium reads the same CDP events from
 chromedriver's performance log (which it already reads for the search-API
-XHR) after the navigation and every scroll round. Over budget, Playwright
+XHR) after the navigation and every scroll round. Only `http(s)` requests and responses that came over the network are counted: Chrome's own `chrome://`, `data:` and `blob:` loads, cache hits and Chrome's error page count nothing. Over budget, Playwright
 aborts new requests in a route and pyppeteer/Selenium block every URL over
 CDP. The figure is an **estimate of the payload through the tunnel**: TLS,
 the CONNECT exchange and connections the browser opens for itself are not
