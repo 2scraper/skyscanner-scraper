@@ -1,4 +1,4 @@
-# skyscanner-scraper
+# Skyscanner Scraper — Flight Itineraries, Prices and Airlines in Python
 
 ![release](https://img.shields.io/github/v/release/2scraper/skyscanner-scraper?sort=semver)
 ![tests](https://github.com/2scraper/skyscanner-scraper/actions/workflows/tests.yml/badge.svg)
@@ -7,6 +7,8 @@
 ![licence](https://img.shields.io/badge/licence-MIT-green)
 ![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20Puppeteer-informational)
 ![local-first](https://img.shields.io/badge/local--first-yes-success)
+
+**Skyscanner scraper** — an open-source (MIT) Python tool that reads skyscanner.com flight searches and writes itineraries with price, airline, departure and arrival times, duration and stops to JSON or CSV. Measured 2026-09-29, none of `--proxy`, `--cdp-endpoint` (the Scraping Browser API) or `--fingerprint` got past PerimeterX on its own; what returned real results was your own local Chrome plus a person clearing the challenge once. Use it to build a fare dataset for a route and dates, or compare two runs with `diff_runs.py` to see price changes per itinerary.
 
 skyscanner.com flight-search scraper: origin/destination/dates in, a flat
 list of itineraries out. Three engines (Playwright primary, Selenium and
@@ -518,6 +520,23 @@ driver import behind a module-level `try/except ImportError`).
 step-by-step checklist, starting with the one test that actually matters
 for this repo: pointing the local-first default at a real search and
 checking whether `flight_parser.py`'s guesses hold up.
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Spinny scraper](https://github.com/2scraper/spinny-scraper) — Used-car listings and car detail pages
+- [Vrbo scraper](https://github.com/2scraper/vrbo-scraper) — Vacation rental prices, ratings and property details…
+- [Webmotors scraper](https://github.com/2scraper/webmotors-scraper) — Car and motorcycle listings from Brazil's webmotors.com.br…
+- [Zimmo scraper](https://github.com/2scraper/zimmo-scraper) — Zimmo.be sale and rent listings
+- [Autotrader scraper](https://github.com/2scraper/autotrader-scraper) — US car listings with VIN, fee-inclusive price, KBB fair…
+- [Avito scraper](https://github.com/2scraper/avito-scraper) — Category and search listings, item pages and seller profiles…
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
 
 ## License
 
