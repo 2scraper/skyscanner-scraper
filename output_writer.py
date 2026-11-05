@@ -368,6 +368,13 @@ def finish_run(
     failed_pages = failed_pages or []
     if rows_stated is None and extra_meta:
         rows_stated = extra_meta.get("itineraries_available")
+    # A browser run reports how many JSON answers the search API gave. The
+    # search page's HTML carries no flights; the XHR is where a search,
+    # empty or not, gives its answer. No answer at all means it never
+    # arrived (seen 2026-11-05: the page still said "Searching for flights"),
+    # which is content not obtained, not an empty route. Absent key (the
+    # Scraper API path, which cannot see the XHR) → unchanged behaviour.
+    search_unanswered = bool(extra_meta) and extra_meta.get("search_api_answered") == 0
     # `incomplete`: the site itself had not finished serving (e.g. a search
     # API still reporting "incomplete") when the run stopped.
     partial = (bool(failed_pages) and pages_completed > 0) or (incomplete and bool(products))
@@ -397,6 +404,9 @@ def finish_run(
         status, exit_code = "partial", EXIT_PARTIAL
     elif blocked:
         status, exit_code = "blocked", EXIT_BLOCKED
+    elif zero_products and search_unanswered:
+        status, exit_code = "failed", EXIT_REMOTE_API_ERROR
+        stop_reason = "search_api_not_received"
     elif zero_products and rows_stated:
         # The site served results and said how many; we parsed none.
         status, exit_code = "parser_found_nothing", EXIT_REMOTE_API_ERROR

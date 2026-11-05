@@ -320,7 +320,10 @@ proxy_auth_failed` / `proxy_balance_exhausted`), or the search
 API stated itineraries and the parser read none of them (`status` and
 `stop_reason: parser_found_nothing` — a parser problem, not an empty
 route), or the proxy budget was spent before any itinerary
-(`stop_reason: proxy_budget_exceeded`) · `6` partial (including a run
+(`stop_reason: proxy_budget_exceeded`), or a browser run got no answer
+from the search API at all (`stop_reason: search_api_not_received` — the
+page was still "Searching for flights"; an answered search with no
+itineraries is still `4`) · `6` partial (including a run
 `--proxy-budget-mb` stopped after collecting itineraries).
 Every completed/partial run writes a `<out>.meta.json` sidecar with
 `status`, `stop_reason`, `pages_completed` (scroll rounds, here),

@@ -1607,6 +1607,40 @@ def _():
                                         **{**_FINISH_KW, "blocked": True}) == output_writer.EXIT_BLOCKED
 
 
+@check("a browser run whose search API never answered (0 responses, zero rows) is content not obtained (exit 5, search_api_not_received), not an empty search (4)")
+def _():
+    import flight_parser as fp
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "s.json")
+        # The engines pass fp.search_meta(...) as extra_meta; build it the same way.
+        unanswered = fp.search_meta(fp.SearchApiCapture(), collected=0, max_results=1000)
+        assert unanswered["search_api_answered"] == 0, unanswered
+        code = output_writer.finish_run(products=[], out_path=out, fmt="json",
+                                        extra_meta=unanswered, **_FINISH_KW)
+        assert code == output_writer.EXIT_REMOTE_API_ERROR, f"got exit {code}"
+        assert not Path(out).exists() and not Path(out + ".meta.json").exists()
+        output_writer.finish_run(products=[], out_path=out, fmt="json", extra_meta=unanswered,
+                                 **{**_FINISH_KW, "allow_empty": True})
+        meta = json.loads(Path(out + ".meta.json").read_text(encoding="utf-8"))
+        assert meta["status"] == "failed" and meta["stop_reason"] == "search_api_not_received", meta
+        # The API answered "complete" with no itineraries: a genuine empty search.
+        # That answer carries no itinerary list, so it is not kept as a
+        # payload, but it still counts as an answer.
+        cap = fp.SearchApiCapture()
+        assert not cap.add(json.dumps({"context": {"status": "complete"}, "itineraries": {"results": []}}))
+        assert not cap.add("<html>not an answer</html>")
+        answered = fp.search_meta(cap, collected=0, max_results=1000)
+        assert answered["search_api_answered"] == 1 and answered["search_api_responses"] == 0, answered
+        assert output_writer.finish_run(products=[], out_path=out, fmt="json", extra_meta=answered,
+                                        **_FINISH_KW) == output_writer.EXIT_ZERO_PRODUCTS
+        # No search stats at all (the Scraper API path cannot see the XHR): unchanged.
+        assert output_writer.finish_run(products=[], out_path=out, fmt="json",
+                                        **_FINISH_KW) == output_writer.EXIT_ZERO_PRODUCTS
+        # Blocked still wins over an unanswered search.
+        assert output_writer.finish_run(products=[], out_path=out, fmt="json", extra_meta=unanswered,
+                                        **{**_FINISH_KW, "blocked": True}) == output_writer.EXIT_BLOCKED
+
+
 @check("every engine rejects a negative --retries/--retry-delay/--scroll-delay/--proxy-block-retries/--cdp-block-retries with an argparse error naming the flag; --retries 0 stays legal")
 def _():
     import contextlib

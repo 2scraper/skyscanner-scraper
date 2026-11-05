@@ -398,6 +398,10 @@ class SearchApiCapture:
     def __init__(self) -> None:
         self.payloads: List[Any] = []
         self.status: Optional[str] = None  # context.status of the latest payload
+        # Every JSON object the search endpoint returned, kept or not: an
+        # empty search answers without an itinerary list, and only a count
+        # of zero here says the search never answered at all.
+        self.answered = 0
 
     def add(self, body: Any) -> bool:
         """Accept a decoded JSON object or its raw text; ignore anything that
@@ -407,6 +411,8 @@ class SearchApiCapture:
                 body = json.loads(body)
             except (ValueError, TypeError):
                 return False
+        if isinstance(body, dict):
+            self.answered += 1
         if not _find_itinerary_lists(body):
             return False
         self.payloads.append(body)
@@ -459,6 +465,7 @@ def search_meta(capture: SearchApiCapture, *, collected: int, max_results: int) 
     return {
         "results_source": "search_api" if capture.payloads else "html",
         "search_api_responses": len(capture.payloads),
+        "search_api_answered": capture.answered,
         "search_api_status": capture.status,
         "itineraries_available": available,
         "capped_by_max_results": capped,
