@@ -80,6 +80,7 @@ rather than being a silent violation of that.
 
 ### Changed
 
+- CI only: the scheduled canary now starts at 07:07 UTC (Mondays) instead of 06:23, so canaries that share one Scraping Browser profile no longer start at the same time and lock each other out.
 - Canary: a failing job's error line now carries the run's `stop_reason`
   from `<out>.latest_attempt.meta.json` when there is one (e.g. `blocked`,
   `proxy_auth_failed`), and the proxy job uploads that file with its
