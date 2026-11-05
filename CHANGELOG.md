@@ -9,6 +9,16 @@ rather than being a silent violation of that.
 
 ## [Unreleased]
 
+> **Behaviour change.** A browser run (any engine) that collected no
+> itineraries and never received an answer from the search API now exits
+> **5** (`status: failed`, `stop_reason: search_api_not_received`) instead
+> of **4**. Seen 2026-11-05 over the Scraping Browser API: the session got
+> past the challenge, but the page still said "Searching for flights" when
+> the run ended, and it was reported as a route with no flights (which
+> `batch_scraper.py` does not retry). A search that answers with no
+> itineraries is still exit 4. The sidecar gains `search_api_answered`
+> (JSON answers from the search endpoint, kept or not).
+
 > **Behaviour change.** A run through a local proxy (`--proxy`,
 > `--proxy-file`, `SKYSCANNER_PROXY`) now makes one pre-check request before
 > starting a browser. A proxy that answers **HTTP 407** or **402** ends the
