@@ -12,6 +12,13 @@ on:
 # here cannot pass. Each live job therefore needs its secret, and then ASSERTS
 # (exit 0, status, a floor, price and currency coverage, the XHR source).
 #
+# Re-measured 2026-11-05 with both secrets set (a US residential proxy; a
+# Scraping Browser API endpoint, US exit): both jobs reached the site and
+# both were served PerimeterX's challenge page (exit 3, blocked; three fresh
+# Scraping Browser sessions). This repository does not implement a
+# PerimeterX solve, so while that holds a red badge here means "blocked",
+# and the error line carries the stop_reason that says so.
+#
 # A missing secret FAILS the job with an ::error:: naming it. A canary that
 # skipped tested nothing, and a green badge on a skip says the site works
 # when nobody looked. A blocked run (exit 3), a parser failure (exit 5) or
@@ -74,6 +81,7 @@ jobs:
           path: |
             canary_out.json
             canary_out.json.meta.json
+            canary_out.json.latest_attempt.meta.json
             canary_out_debug.html
             canary_out_search_api_debug.json
           retention-days: 14
@@ -88,9 +96,9 @@ jobs:
         if: env.HAS_CDP != 'true'
         run: |
           echo "::error::canary NOT RUN: the SKYSCANNER_CDP_ENDPOINT repository secret is missing \
-          (a Scraping Browser API ws:// endpoint). Measured 2026-09-20..29: every Scraping Browser \
-          session was challenged by PerimeterX on this site, so expect exit 3 (red) once it is set; \
-          the job exists to notice when that changes."
+          (a Scraping Browser API ws:// endpoint). Measured 2026-09-20..29 and again 2026-11-05: \
+          every Scraping Browser session was challenged by PerimeterX on this site, so expect exit 3 \
+          (red) once it is set; the job exists to notice when that changes."
           exit 1
       - uses: actions/checkout@v4
         if: env.HAS_CDP == 'true'
