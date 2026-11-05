@@ -43,6 +43,10 @@ What is measured, as of 2026-09-29. The dated investigation that got here
   `--fingerprint`); the Scraping Browser API over `--cdp-endpoint`
   (`Captcha.setAutoSolve` on, fresh sessions via `--cdp-block-retries`);
   `--cookies-file` replaying a human-cleared session into another browser.
+  Re-measured 2026-11-05 from a GitHub runner (the canary below): local
+  Chromium through a US residential proxy, and the Scraping Browser API
+  with a US exit (three fresh sessions), were both served the PerimeterX
+  challenge page and exited 3.
   `--scraper-api` returned pages without flights, because it cannot see the
   XHR. `--stealth` has not been live-tested.
 - **What a captcha solver can and cannot do here — the narrow version.**
@@ -506,6 +510,14 @@ job needs a secret: `SKYSCANNER_PROXY` (a residential proxy) or
 `SKYSCANNER_CDP_ENDPOINT` (a Scraping Browser API endpoint). Without its
 secret a job FAILS with an error naming the secret — a red canary badge
 here may mean "not configured", and the log says which.
+
+With both secrets set (measured 2026-11-05), both jobs reached the site and
+were challenged by PerimeterX, so they exit 3 and the badge is red because
+the run was **blocked**, not because the parser broke. A failing job's
+error line names the exit code and, for the proxy job, the `stop_reason`
+from `<out>.latest_attempt.meta.json` (`blocked`, `proxy_auth_failed`, …);
+the challenge page itself is uploaded as `*_debug.html`. The job turns
+green only when an automated run gets real results again.
 
 ## Development
 

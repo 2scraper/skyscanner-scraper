@@ -70,6 +70,14 @@ rather than being a silent violation of that.
 
 ### Changed
 
+- Canary: a failing job's error line now carries the run's `stop_reason`
+  from `<out>.latest_attempt.meta.json` when there is one (e.g. `blocked`,
+  `proxy_auth_failed`), and the proxy job uploads that file with its
+  artefacts. The README and workflow record the 2026-11-05 measurement:
+  with both canary secrets set, local Chromium through a US residential
+  proxy and the Scraping Browser API (US exit) were both challenged by
+  PerimeterX (exit 3), so a red canary currently means "blocked".
+
 - CI only: both canary jobs bill a paid route (`SKYSCANNER_PROXY`,
   `SKYSCANNER_CDP_ENDPOINT`), so the canary now runs weekly (Mondays 06:23 UTC)
   instead of daily; a manual dispatch still runs it.

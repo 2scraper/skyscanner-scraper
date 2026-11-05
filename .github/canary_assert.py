@@ -26,10 +26,26 @@ def fail(msg: str) -> int:
     return 1
 
 
+def attempt_stop_reason(out: str):
+    """stop_reason from `<out>.latest_attempt.meta.json`, or None.
+
+    A run that wrote no rows leaves no `<out>.meta.json`; a run through a
+    local proxy still records itself in the attempt sidecar, so a red job
+    can say WHY it stopped (blocked, proxy_auth_failed, ...) in its error
+    line instead of only an exit code."""
+    try:
+        meta = json.loads(Path(out + ".latest_attempt.meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta.get("stop_reason") if isinstance(meta, dict) else None
+
+
 def main(out: str, code: str) -> int:
     code = int(code)
     if code != 0:
-        return fail(f"exit {code} ({EXIT_MEANING.get(code, 'unknown')}) — see the run log and uploaded artefacts")
+        reason = attempt_stop_reason(out)
+        why = f", stop_reason {reason}" if reason else ""
+        return fail(f"exit {code} ({EXIT_MEANING.get(code, 'unknown')}{why}) — see the run log and uploaded artefacts")
     meta_path = Path(out + ".meta.json")
     if not meta_path.exists():
         return fail("exit 0 but no sidecar was written")
